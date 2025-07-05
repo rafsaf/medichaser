@@ -51,6 +51,7 @@ from notifications import (
 
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
 DATA_PATH = CURRENT_PATH / "data"
+DATA_PATH.mkdir(parents=True, exist_ok=True)
 TOKEN_PATH = DATA_PATH / "medicover_token.json"
 TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
 LOGIN_LOCK_PATH = DATA_PATH / "medicover_login.lock"

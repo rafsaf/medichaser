@@ -35,9 +35,14 @@ xmpppy = ">=0.7.1"
 medichaser = "medichaser:medichaser"
 
 [tool.poetry.group.dev.dependencies]
+mypy = "^1.16.1"
 pytest = "^8.4.1"
 pytest-xdist = "^3.8.0"
 ruff = ">=0.12.1"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
 
 [tool.pytest.ini_options]
 addopts = "-vv -n auto"
