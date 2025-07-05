@@ -1,4 +1,4 @@
-name: push image to dockerhub on release
+name: docker_build
 on:
   push:
     branches:
@@ -11,7 +11,7 @@ on:
       - created
 
 jobs:
-  push_latest_image_to_dockerhub:
+  docker_build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,12 +57,13 @@ jobs:
           dockerfile: Dockerfile
           skip-extraction: ${{ steps.cache.outputs.cache-hit }}
 
-      - name: Build and push medichaser image
+      - name: Build medichaser image
         uses: docker/build-push-action@v6
         with:
           file: Dockerfile
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          target: app
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
