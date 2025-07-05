@@ -37,15 +37,22 @@ medichaser = "medichaser:medichaser"
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.16.1"
 pytest = "^8.4.1"
+pytest-cov = "^6.2.1"
 pytest-xdist = "^3.8.0"
 ruff = ">=0.12.1"
+types-requests = "^2.32.0.20240712"
 
 [tool.mypy]
+ignore_missing_imports = true
 python_version = "3.13"
 strict = true
 
+[tool.coverage.run]
+omit = ["tests.py"]
+source = ["."]
+
 [tool.pytest.ini_options]
-addopts = "-vv -n auto"
+addopts = "-vv -n auto --cov --cov-report xml --cov-report term-missing --cov-fail-under=50"
 testpaths = ["tests.py"]
 
 [build-system]

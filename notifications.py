@@ -28,7 +28,7 @@ pushover = get_notifier("pushover")
 telegram = get_notifier("telegram")
 
 
-def pushbullet_notify(message, title: str | None = None):
+def pushbullet_notify(message: str, title: str | None = None) -> None:
     try:
         if title is None:
             r = pushbullet.notify(message=message)
@@ -42,7 +42,7 @@ def pushbullet_notify(message, title: str | None = None):
         print(f"Pushbullet notification failed:\n{r.errors}")
 
 
-def pushover_notify(message, title: str | None = None):
+def pushover_notify(message: str, title: str | None = None) -> None:
     try:
         if title is None:
             r = pushover.notify(message=message)
@@ -56,7 +56,7 @@ def pushover_notify(message, title: str | None = None):
         print(f"Pushover notification failed:\n{r.errors}")
 
 
-def telegram_notify(message, title: str | None = None):
+def telegram_notify(message: str, title: str | None = None) -> None:
     try:
         if title:
             message = f"<b>{title}</b>\n{message}"
@@ -73,7 +73,7 @@ def telegram_notify(message, title: str | None = None):
         print(f"Telegram notification failed\n{r.errors}")
 
 
-def xmpp_notify(message):
+def xmpp_notify(message: str) -> None:
     try:
         jid = environ["NOTIFIERS_XMPP_JID"]
         password = environ["NOTIFIERS_XMPP_PASSWORD"]
@@ -88,7 +88,7 @@ def xmpp_notify(message):
                     user=r.getNode(), password=password, resource=r.getResource()
                 )
             )
-            or (not conn.send(xmpp.protocol.Message(to=receiver, body=message)))  # type: ignore
+            or (not conn.send(xmpp.protocol.Message(to=receiver, body=message)))  # pyright: ignore[reportAttributeAccessIssue]
         ):
             print("XMPP notification failed")
     except KeyError as e:
@@ -98,7 +98,7 @@ def xmpp_notify(message):
         )
 
 
-def gotify_notify(message, title: str | None = None):
+def gotify_notify(message: str, title: str | None = None) -> None:
     try:
         host = environ["GOTIFY_HOST"]
         token = environ["GOTIFY_TOKEN"]

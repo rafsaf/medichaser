@@ -1,4 +1,21 @@
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# Copyright: (c) 2025, rafsaf - https://github.com/rafsaf/medichaser
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import datetime
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -136,7 +153,7 @@ class TestAppointmentFinder:
     def test_init(self) -> None:
         """Test AppointmentFinder initialization."""
         mock_session = Mock()
-        headers = {"Authorization": "Bearer test_token"}
+        headers: dict[str, str] = {"Authorization": "Bearer test_token"}
 
         finder = AppointmentFinder(mock_session, headers)
         assert finder.session == mock_session
@@ -175,13 +192,12 @@ class TestAppointmentFinder:
         assert result == {}
         mock_log.error.assert_called_once_with("Error 500: Internal Server Error")
 
-    def test_find_appointments_basic(self) -> None:
+    def test_find_appointments_basic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test basic appointment finding."""
         mock_session = Mock()
         finder = AppointmentFinder(mock_session, {})
-
-        # Mock the http_get method
-        finder.http_get = Mock(return_value={"items": [{"id": 1}, {"id": 2}]})
+        mock_http_get = Mock(return_value={"items": [{"id": 1}, {"id": 2}]})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
 
         start_date = datetime.date(2025, 1, 1)
         result = finder.find_appointments(
@@ -195,15 +211,16 @@ class TestAppointmentFinder:
         )
 
         assert result == [{"id": 1}, {"id": 2}]
-        finder.http_get.assert_called_once()
+        mock_http_get.assert_called_once()
 
-    def test_find_appointments_with_filters(self) -> None:
+    def test_find_appointments_with_filters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test appointment finding with all filters."""
         mock_session = Mock()
         finder = AppointmentFinder(mock_session, {})
-
-        # Mock the http_get method
-        finder.http_get = Mock(return_value={"items": [{"id": 1}]})
+        mock_http_get = Mock(return_value={"items": [{"id": 1}]})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
 
         start_date = datetime.date(2025, 1, 1)
         result = finder.find_appointments(
@@ -218,24 +235,27 @@ class TestAppointmentFinder:
 
         assert result == [{"id": 1}]
         # Verify that the correct parameters were passed
-        call_args = finder.http_get.call_args
+        call_args = mock_http_get.call_args
         assert call_args is not None
-        params = call_args.args[1]
+        params: dict[str, Any] = call_args.args[1]
         assert "DoctorLanguageIds" in params
         assert "DoctorIds" in params
 
-    def test_find_appointments_with_end_date_filter(self) -> None:
+    def test_find_appointments_with_end_date_filter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test appointment finding with end date filtering."""
         mock_session = Mock()
         finder = AppointmentFinder(mock_session, {})
 
         # Mock appointments with different dates
-        mock_appointments = [
+        mock_appointments: list[dict[str, Any]] = [
             {"id": 1, "appointmentDate": "2025-01-01T10:00:00"},
             {"id": 2, "appointmentDate": "2025-01-15T10:00:00"},
             {"id": 3, "appointmentDate": "2025-02-01T10:00:00"},
         ]
-        finder.http_get = Mock(return_value={"items": mock_appointments})
+        mock_http_get = Mock(return_value={"items": mock_appointments})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
 
         start_date = datetime.date(2025, 1, 1)
         end_date = datetime.date(2025, 1, 20)
@@ -255,17 +275,17 @@ class TestAppointmentFinder:
         assert result[0]["id"] == 1
         assert result[1]["id"] == 2
 
-    def test_find_filters(self) -> None:
+    def test_find_filters(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test finding filters."""
         mock_session = Mock()
         finder = AppointmentFinder(mock_session, {})
+        mock_http_get = Mock(return_value={"regions": [{"id": 1}]})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
 
-        finder.http_get = Mock(return_value={"regions": [{"id": 1}]})
-
-        result = finder.find_filters(region=1, specialty=2)
+        result = finder.find_filters(region=1, specialty=[2])
 
         assert result == {"regions": [{"id": 1}]}
-        finder.http_get.assert_called_once()
+        mock_http_get.assert_called_once()
 
 
 class TestNotifier:
@@ -278,7 +298,7 @@ class TestNotifier:
 
     def test_format_appointments_single(self) -> None:
         """Test formatting single appointment."""
-        appointments = [
+        appointments: list[dict[str, Any]] = [
             {
                 "appointmentDate": "2025-01-01T10:00:00",
                 "clinic": {"name": "Test Clinic"},
@@ -298,7 +318,7 @@ class TestNotifier:
 
     def test_format_appointments_multiple(self) -> None:
         """Test formatting multiple appointments."""
-        appointments = [
+        appointments: list[dict[str, Any]] = [
             {
                 "appointmentDate": "2025-01-01T10:00:00",
                 "clinic": {"name": "Clinic 1"},
@@ -331,7 +351,9 @@ class TestNotifier:
         mock_pushbullet = Mock()
         monkeypatch.setattr("medichaser.pushbullet_notify", mock_pushbullet)
 
-        appointments = [{"appointmentDate": "2025-01-01T10:00:00"}]
+        appointments: list[dict[str, Any]] = [
+            {"appointmentDate": "2025-01-01T10:00:00"}
+        ]
         Notifier.send_notification(appointments, "pushbullet", "Test Title")
 
         mock_pushbullet.assert_called_once()
@@ -343,7 +365,9 @@ class TestNotifier:
         mock_telegram = Mock()
         monkeypatch.setattr("medichaser.telegram_notify", mock_telegram)
 
-        appointments = [{"appointmentDate": "2025-01-01T10:00:00"}]
+        appointments: list[dict[str, Any]] = [
+            {"appointmentDate": "2025-01-01T10:00:00"}
+        ]
         Notifier.send_notification(appointments, "telegram", "Test Title")
 
         mock_telegram.assert_called_once()
@@ -440,7 +464,7 @@ class TestUtilityFunctions:
         mock_log = Mock()
         monkeypatch.setattr("medichaser.log", mock_log)
 
-        appointments = [
+        appointments: list[dict[str, Any]] = [
             {
                 "appointmentDate": "2025-01-01T10:00:00",
                 "clinic": {"name": "Test Clinic"},
@@ -569,7 +593,7 @@ class TestNotificationFunctions:
 
     def test_xmpp_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test successful XMPP notification."""
-        mock_environ = {
+        mock_environ: dict[str, str] = {
             "NOTIFIERS_XMPP_JID": "user@example.com",
             "NOTIFIERS_XMPP_PASSWORD": "password",
             "NOTIFIERS_XMPP_RECEIVER": "receiver@example.com",
@@ -598,7 +622,7 @@ class TestNotificationFunctions:
 
     def test_xmpp_notify_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test XMPP notification with missing environment variables."""
-        mock_environ = {}
+        mock_environ: dict[str, str] = {}
         mock_print = Mock()
 
         monkeypatch.setattr("notifications.environ", mock_environ)
@@ -611,7 +635,7 @@ class TestNotificationFunctions:
 
     def test_gotify_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test successful Gotify notification."""
-        mock_environ = {
+        mock_environ: dict[str, str] = {
             "GOTIFY_HOST": "http://localhost:8080",
             "GOTIFY_TOKEN": "test_token",
             "GOTIFY_PRIORITY": "5",
@@ -631,7 +655,7 @@ class TestNotificationFunctions:
 
     def test_gotify_notify_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test Gotify notification with missing environment variables."""
-        mock_environ = {}
+        mock_environ: dict[str, str] = {}
         mock_print = Mock()
 
         monkeypatch.setattr("notifications.environ", mock_environ)
@@ -646,7 +670,7 @@ class TestNotificationFunctions:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test Gotify notification with default priority."""
-        mock_environ = {
+        mock_environ: dict[str, str] = {
             "GOTIFY_HOST": "http://localhost:8080",
             "GOTIFY_TOKEN": "test_token",
         }

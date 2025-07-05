@@ -26,6 +26,7 @@ import select
 import sys
 import time
 from logging.handlers import RotatingFileHandler
+from typing import Any, cast
 
 import requests
 import tenacity
@@ -36,6 +37,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
@@ -104,12 +106,12 @@ class MFAError(Exception):
 
 
 class Authenticator:
-    def __init__(self, username, password):
+    def __init__(self, username: str, password: str) -> None:
         self.username = username
         self.password = password
         self.session = requests.Session()
         self.session.mount("https://", global_adapter)
-        self.headers = {
+        self.headers: dict[str, str] = {
             "Accept": "application/json",
             "Accept-Encoding": "gzip, deflate, br, zstd",
             "Accept-Language": "pl",
@@ -120,14 +122,14 @@ class Authenticator:
             "Sec-Fetch-Site": "same-site",
             "Sec-GPC": "1",
             "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Linux"',
+            "Sec-Ch-Ua-Platform": "Linux",
         }
-        self.tokenA = None
-        self.tokenR = None
-        self.expires_at = None
-        self.driver = None
+        self.tokenA: str | None = None
+        self.tokenR: str | None = None
+        self.expires_at: int | None = None
+        self.driver: WebDriver | None = None
 
-    def _init_driver(self):
+    def _init_driver(self) -> WebDriver:
         """Initializes the Selenium WebDriver if it's not already running."""
         if self.driver is None:
             options = webdriver.ChromeOptions()
@@ -153,16 +155,17 @@ class Authenticator:
 
             log.info(f"Using User-Agent: {ua}")
 
+        assert self.driver is not None
         return self.driver
 
-    def _quit_driver(self):
+    def _quit_driver(self) -> None:
         """Quits the Selenium WebDriver if it's running."""
         if self.driver:
             self.driver.quit()
             self.driver = None
 
     @token_lock
-    def refresh_token(self):
+    def refresh_token(self) -> None:
         """Refresh the access token using the refresh token."""
         if (
             self.tokenA
@@ -223,7 +226,7 @@ class Authenticator:
         self.expires_at = data.get("expires_at")
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
 
-    def _get_token_from_storage(self):
+    def _get_token_from_storage(self) -> bool:
         """Retrieves token from browser's localStorage."""
         driver = self._init_driver()
         try:
@@ -404,23 +407,30 @@ class Authenticator:
 
 
 class AppointmentFinder:
-    def __init__(self, session, headers):
+    def __init__(self, session: requests.Session, headers: dict[str, str]) -> None:
         self.session = session
         self.headers = headers
 
-    def http_get(self, url, params):
+    def http_get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         response = self.session.get(url, headers=self.headers, params=params)
         if response.status_code == 200:
-            return response.json()
+            return cast(dict[str, Any], response.json())
         else:
             log.error(f"Error {response.status_code}: {response.text}")
             return {}
 
     def find_appointments(
-        self, region, specialty, clinic, start_date, end_date, language, doctor=None
-    ):
+        self,
+        region: int,
+        specialty: list[int],
+        clinic: int | None,
+        start_date: datetime.date,
+        end_date: datetime.date | None,
+        language: int | None,
+        doctor: int | None = None,
+    ) -> list[dict[str, Any]]:
         appointment_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/slots"
-        params = {
+        params: dict[str, Any] = {
             "RegionIds": region,
             "SpecialtyIds": specialty,
             "ClinicIds": clinic,
@@ -437,9 +447,9 @@ class AppointmentFinder:
         if doctor:
             params["DoctorIds"] = doctor
 
-        response = self.http_get(appointment_url, params)
+        response_json = self.http_get(appointment_url, params)
 
-        items = response.get("items", [])
+        items: list[dict[str, Any]] = response_json.get("items", [])
 
         if end_date:
             items = [
@@ -451,10 +461,12 @@ class AppointmentFinder:
 
         return items
 
-    def find_filters(self, region=None, specialty=None):
+    def find_filters(
+        self, region: int | None = None, specialty: list[int] | None = None
+    ) -> dict[str, Any]:
         filters_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/filters"
 
-        params = {"SlotSearchType": 0}
+        params: dict[str, Any] = {"SlotSearchType": 0}
         if region:
             params["RegionIds"] = region
         if specialty:
@@ -466,7 +478,7 @@ class AppointmentFinder:
 
 class Notifier:
     @staticmethod
-    def format_appointments(appointments):
+    def format_appointments(appointments: list[dict[str, Any]]) -> str:
         """Format appointments into a human-readable string."""
         if not appointments:
             return "No appointments found."
@@ -487,13 +499,19 @@ class Notifier:
                 f"Date: {date}\n"
                 f"Clinic: {clinic}\n"
                 f"Doctor: {doctor}\n"
-                f"Languages: {languages}\n" + f"Specialty: {specialty}\n" + "-" * 50
+                f"Languages: {languages}\n"
+                + f"Specialty: {specialty}\n"
+                + "--------------------------------------------------"
             )
             messages.append(message)
         return "\n".join(messages)
 
     @staticmethod
-    def send_notification(appointments, notifier, title):
+    def send_notification(
+        appointments: list[dict[str, Any]],
+        notifier: str | None,
+        title: str | None,
+    ) -> None:
         """Send a notification with formatted appointments."""
         message = Notifier.format_appointments(appointments)
         if notifier == "pushbullet":
@@ -508,14 +526,14 @@ class Notifier:
             gotify_notify(message, title)
 
 
-def display_appointments(appointments):
+def display_appointments(appointments: list[dict[str, Any]]) -> None:
     log.info("")
-    log.info("-" * 50)
+    log.info("--------------------------------------------------")
     if not appointments:
         log.info("No new appointments found.")
     else:
         log.info("New appointments found:")
-        log.info("-" * 50)
+        log.info("--------------------------------------------------")
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -532,10 +550,10 @@ def display_appointments(appointments):
             log.info(f"  Doctor: {doctor}")
             log.info(f"  Specialty: {specialty}")
             log.info(f"  Languages: {languages}")
-            log.info("-" * 50)
+            log.info("--------------------------------------------------")
 
 
-def json_date_serializer(obj):
+def json_date_serializer(obj: Any) -> str:
     """JSON serializer for objects not serializable by default json code"""
     if isinstance(obj, datetime.date | datetime.datetime):
         return obj.isoformat()
@@ -564,7 +582,7 @@ class NextRun:
         )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Find appointment slots.")
     subparsers = parser.add_subparsers(
         dest="command", required=True, help="Command to execute"
@@ -673,7 +691,7 @@ def main():
             )
 
         next_run = NextRun(args.interval)
-        previous_appointments = []
+        previous_appointments: list[dict[str, Any]] = []
 
         while True:
             # Authenticate
