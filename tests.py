@@ -15,8 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
+import sys
+from argparse import Namespace
 from typing import Any
-from unittest.mock import Mock
+import typing
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 import requests
@@ -31,6 +34,7 @@ from medichaser import (
     Notifier,
     display_appointments,
     json_date_serializer,
+    main,
 )
 from notifications import (
     gotify_notify,
@@ -722,5 +726,291 @@ class TestExceptions:
 
     def test_mfa_error(self) -> None:
         """Test MFAError exception."""
-        with pytest.raises(MFAError, match="Test MFA error"):
-            raise MFAError("Test MFA error")
+        with pytest.raises(MFAError, match="Test MFA Error"):
+            raise MFAError("Test MFA Error")
+
+
+class TestAuthenticatorLogin:
+    def test_init_driver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test the _init_driver method."""
+        mock_chrome = MagicMock()
+        monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
+        mock_stealth = MagicMock()
+        monkeypatch.setattr("medichaser.stealth", mock_stealth)
+
+        auth = Authenticator("user", "pass")
+        driver = auth._init_driver()
+
+        mock_chrome.assert_called_once()
+        mock_stealth.assert_called_once()
+        assert driver is not None
+        assert "User-Agent" in auth.headers
+
+
+def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test the main function for a single run of find-appointment."""
+    mock_args = Namespace(
+        command="find-appointment",
+        region=1,
+        specialty=[2],
+        clinic=3,
+        doctor=4,
+        language=6,
+        date=datetime.date(2025, 1, 1),
+        enddate=datetime.date(2025, 1, 31),
+        interval=None,
+        notification="pushbullet",
+        title="Test",
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_appointments.return_value = [
+        {"id": 1, "name": "Appointment"}
+    ]
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_notifier = MagicMock()
+    monkeypatch.setattr("medichaser.Notifier.send_notification", mock_notifier)
+
+    mock_display = MagicMock()
+    monkeypatch.setattr("medichaser.display_appointments", mock_display)
+
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    main()
+
+    mock_auth_instance.login.assert_called_once()
+    mock_auth_instance.refresh_token.assert_called_once()
+    mock_finder_instance.find_appointments.assert_called_once_with(
+        1, [2], 3, datetime.date(2025, 1, 1), datetime.date(2025, 1, 31), 6, 4
+    )
+    mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
+    mock_notifier.assert_called_once_with(
+        [{"id": 1, "name": "Appointment"}], "pushbullet", "Test"
+    )
+
+
+def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test the main function for list-filters regions."""
+    mock_args = Namespace(
+        command="list-filters",
+        filter_type="regions",
+        region=None,
+        specialty=None,
+        notification=None,
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_filters.return_value = {
+        "regions": [{"id": 1, "value": "Region 1"}]
+    }
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_log = MagicMock()
+    monkeypatch.setattr("medichaser.log", mock_log)
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    main()
+
+    mock_auth_instance.login.assert_called_once()
+    mock_auth_instance.refresh_token.assert_called_once()
+    mock_finder_instance.find_filters.assert_called_once_with()
+    mock_log.info.assert_called_with("1 - Region 1")
+
+
+def test_main_list_filters_doctors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test the main function for list-filters doctors."""
+    mock_args = Namespace(
+        command="list-filters",
+        filter_type="doctors",
+        region=1,
+        specialty=2,
+        notification=None,
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_filters.return_value = {
+        "doctors": [{"id": 1, "value": "Doctor 1"}]
+    }
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_log = MagicMock()
+    monkeypatch.setattr("medichaser.log", mock_log)
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    main()
+
+    mock_auth_instance.login.assert_called_once()
+    mock_auth_instance.refresh_token.assert_called_once()
+    mock_finder_instance.find_filters.assert_called_once_with(1, 2)
+    mock_log.info.assert_called_with("1 - Doctor 1")
+
+
+def test_main_missing_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with missing environment variables."""
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = Namespace(command="find-appointment")
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+    monkeypatch.setattr("os.environ", {})
+    with pytest.raises(SystemExit) as e:
+        main()
+    assert e.value.code == 1
+
+
+def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test the main function for an interval run of find-appointment."""
+    mock_args = Namespace(
+        command="find-appointment",
+        region=1,
+        specialty=[2],
+        clinic=3,
+        doctor=4,
+        language=6,
+        date=datetime.date(2025, 1, 1),
+        enddate=datetime.date(2025, 1, 31),
+        interval=10,
+        notification="pushover",
+        title="Interval Test",
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    mock_auth_instance.refresh_token.side_effect = [InvalidGrantError, None, None, None]
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_appointments.side_effect = [
+        [{"id": 1, "name": "Appointment 1"}],
+        [
+            {"id": 1, "name": "Appointment 1"},
+            {"id": 2, "name": "Appointment 2"},
+        ],
+    ]
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_notifier = MagicMock()
+    monkeypatch.setattr("medichaser.Notifier.send_notification", mock_notifier)
+
+    mock_display = MagicMock()
+    monkeypatch.setattr("medichaser.display_appointments", mock_display)
+
+    run_count = 0
+
+    def mock_is_time_to_run() -> typing.Literal[True]:
+        nonlocal run_count
+        run_count += 1
+        if run_count > 2:
+            raise StopIteration  # End the test
+        return True
+
+    mock_next_run_instance = MagicMock()
+    mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
+    monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
+
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    with pytest.raises(StopIteration):
+        main()
+
+    assert mock_auth_instance.login.call_count == 2
+    assert mock_auth_instance.refresh_token.call_count == 4
+    assert mock_finder_instance.find_appointments.call_count == 2
+
+    mock_display.assert_any_call([{"id": 1, "name": "Appointment 1"}])
+    mock_notifier.assert_any_call(
+        [{"id": 1, "name": "Appointment 1"}], "pushover", "Interval Test"
+    )
+
+    mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
+    mock_notifier.assert_any_call(
+        [{"id": 2, "name": "Appointment 2"}], "pushover", "Interval Test"
+    )
+
+
+def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test the main function for list-filters clinics."""
+    mock_args = Namespace(
+        command="list-filters",
+        filter_type="clinics",
+        region=1,
+        specialty=[2, 3],
+        notification=None,
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_filters.return_value = {
+        "clinics": [{"id": 1, "value": "Clinic 1"}]
+    }
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_log = MagicMock()
+    monkeypatch.setattr("medichaser.log", mock_log)
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    main()
+
+    mock_auth_instance.login.assert_called_once()
+    mock_auth_instance.refresh_token.assert_called_once()
+    mock_finder_instance.find_filters.assert_called_once_with(1, [2, 3])
+    mock_log.info.assert_called_with("1 - Clinic 1")
