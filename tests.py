@@ -855,7 +855,7 @@ class TestExceptions:
             raise MFAError("Test MFA Error")
 
 
-def test_main_find_appointment_single_run(monkeypatch):
+def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test the main function for a single run of find-appointment."""
     mock_args = Namespace(
         command="find-appointment",
