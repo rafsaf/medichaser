@@ -15,11 +15,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
-import sys
+import typing
 from argparse import Namespace
 from typing import Any
-import typing
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import MagicMock, Mock
 
 import pytest
 import requests
