@@ -149,6 +149,21 @@ class TestAuthenticator:
 
         mock_token_path.unlink.assert_called_once()
 
+    def test_init_driver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test the _init_driver method."""
+        mock_chrome = MagicMock()
+        monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
+        mock_stealth = MagicMock()
+        monkeypatch.setattr("medichaser.stealth", mock_stealth)
+
+        auth = Authenticator("user", "pass")
+        driver = auth._init_driver()
+
+        mock_chrome.assert_called_once()
+        mock_stealth.assert_called_once()
+        assert driver is not None
+        assert "User-Agent" in auth.headers
+
 
 class TestAppointmentFinder:
     """Test cases for the AppointmentFinder class."""
@@ -547,6 +562,117 @@ class TestNotificationFunctions:
         mock_print.assert_called_once()
         assert "Pushbullet notification failed" in mock_print.call_args[0][0]
 
+    def test_pushover_notify_no_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test pushover notification without title."""
+        mock_pushover = Mock()
+        mock_result = Mock()
+        mock_result.status = "Success"
+        mock_pushover.notify.return_value = mock_result
+
+        monkeypatch.setattr("notifications.pushover", mock_pushover)
+
+        pushover_notify("Test message")
+
+        mock_pushover.notify.assert_called_once_with(message="Test message")
+
+    def test_pushover_notify_bad_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test pushover notification with bad arguments."""
+        mock_pushover = Mock()
+        mock_pushover.notify.side_effect = BadArguments("Invalid token")
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.pushover", mock_pushover)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        pushover_notify("Test message")
+
+        mock_print.assert_called_once()
+        assert "Pushover failed" in mock_print.call_args[0][0]
+
+    def test_pushover_notify_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test pushover notification failure."""
+        mock_pushover = Mock()
+        mock_result = Mock()
+        mock_result.status = "Failed"
+        mock_result.errors = ["Error message"]
+        mock_pushover.notify.return_value = mock_result
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.pushover", mock_pushover)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        pushover_notify("Test message")
+
+        mock_print.assert_called_once()
+        assert "Pushover notification failed" in mock_print.call_args[0][0]
+
+    def test_telegram_notify_bad_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test telegram notification with bad arguments."""
+        mock_telegram = Mock()
+        mock_telegram.notify.side_effect = BadArguments("Invalid chat id")
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.telegram", mock_telegram)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        telegram_notify("Test message")
+
+        mock_print.assert_called_once()
+        assert "Telegram notifications require" in mock_print.call_args[0][0]
+
+    def test_telegram_notify_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test telegram notification failure."""
+        mock_telegram = Mock()
+        mock_result = Mock()
+        mock_result.status = "Failed"
+        mock_result.errors = ["Error message"]
+        mock_telegram.notify.return_value = mock_result
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.telegram", mock_telegram)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        telegram_notify("Test message")
+
+        mock_print.assert_called_once()
+        assert "Telegram notification failed" in mock_print.call_args[0][0]
+
+    def test_xmpp_notify_send_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test XMPP notification with send failure."""
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_XMPP_JID": "user@example.com",
+            "NOTIFIERS_XMPP_PASSWORD": "password",
+            "NOTIFIERS_XMPP_RECEIVER": "receiver@example.com",
+        }
+        mock_xmpp = Mock()
+        mock_jid = Mock()
+        mock_jid.getDomain.return_value = "example.com"
+        mock_jid.getNode.return_value = "user"
+        mock_jid.getResource.return_value = "resource"
+        mock_xmpp.protocol.JID.return_value = mock_jid
+
+        mock_client = Mock()
+        mock_client.connect.return_value = True
+        mock_client.auth.return_value = True
+        mock_client.send.return_value = False  # Simulate send failure
+        mock_xmpp.Client.return_value = mock_client
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.xmpp", mock_xmpp)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        xmpp_notify("Test message")
+
+        mock_client.connect.assert_called_once()
+        mock_client.auth.assert_called_once()
+        mock_client.send.assert_called_once()
+        mock_print.assert_called_once_with("XMPP notification failed")
+
     def test_pushover_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test successful pushover notification."""
         mock_pushover = Mock()
@@ -729,24 +855,7 @@ class TestExceptions:
             raise MFAError("Test MFA Error")
 
 
-class TestAuthenticatorLogin:
-    def test_init_driver(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test the _init_driver method."""
-        mock_chrome = MagicMock()
-        monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
-        mock_stealth = MagicMock()
-        monkeypatch.setattr("medichaser.stealth", mock_stealth)
-
-        auth = Authenticator("user", "pass")
-        driver = auth._init_driver()
-
-        mock_chrome.assert_called_once()
-        mock_stealth.assert_called_once()
-        assert driver is not None
-        assert "User-Agent" in auth.headers
-
-
-def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_find_appointment_single_run(monkeypatch):
     """Test the main function for a single run of find-appointment."""
     mock_args = Namespace(
         command="find-appointment",

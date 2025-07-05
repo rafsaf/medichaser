@@ -259,7 +259,7 @@ class Authenticator:
         retry=tenacity.retry_if_not_exception_type(MFAError),
         reraise=True,
     )
-    def login(self) -> None:
+    def login(self) -> None:  # pragma: no cover
         log.info("No valid saved token found, attempting browser login.")
         driver = self._init_driver()
         wait = WebDriverWait(driver, 8)

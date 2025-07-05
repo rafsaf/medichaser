@@ -52,7 +52,7 @@ omit = ["tests.py"]
 source = ["."]
 
 [tool.pytest.ini_options]
-addopts = "-vv -n auto --cov --cov-report xml --cov-report term-missing --cov-fail-under=50"
+addopts = "-vv -n auto --cov --cov-report xml --cov-report term-missing --cov-fail-under=80"
 testpaths = ["tests.py"]
 
 [build-system]
