@@ -35,7 +35,13 @@ xmpppy = ">=0.7.1"
 medichaser = "medichaser:medichaser"
 
 [tool.poetry.group.dev.dependencies]
+pytest = "^8.4.1"
+pytest-xdist = "^3.8.0"
 ruff = ">=0.12.1"
+
+[tool.pytest.ini_options]
+addopts = "-vv -n auto"
+testpaths = ["tests.py"]
 
 [build-system]
 build-backend = "poetry.core.masonry.api"

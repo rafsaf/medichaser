@@ -41,7 +41,8 @@ FROM base AS poetry
 RUN --mount=type=cache,target=/root/.cache/pip pip install poetry==2.0.1
 RUN --mount=type=cache,target=/root/.cache/pip poetry self add poetry-plugin-export
 COPY poetry.lock pyproject.toml ./
-RUN poetry export -o  /requirements.txt --without-hashes --without="dev"
+RUN poetry export -o  /requirements.txt --without-hashes
+RUN poetry export -o  /requirements-dev.txt --without-hashes --with dev
 
 FROM base AS app
 
@@ -63,3 +64,12 @@ COPY medichaser.py notifications.py LICENSE ./
 EXPOSE 7681
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["ttyd", "-W", "bash"]
+
+FROM app AS tests
+USER root
+COPY --from=poetry /requirements-dev.txt /requirements-dev.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements-dev.txt
+COPY pyproject.toml tests.py ./
+
+ENTRYPOINT []
+CMD ["pytest"]

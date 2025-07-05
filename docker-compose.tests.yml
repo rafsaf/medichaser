@@ -1,0 +1,10 @@
+services:
+
+  medichaser_tests:
+    restart: "no"
+    build:
+      target: tests
+      context: ./
+      dockerfile: Dockerfile
+    env_file:
+      - .env.example
