@@ -895,6 +895,11 @@ class Notifier:
     ) -> None:
         """Send a notification with formatted appointments."""
         message = Notifier.format_appointments(appointments)
+        if notifier is None:
+            log.info("No notifier specified, skipping notification.")
+            return
+
+        log.info("Sending notification to %s with title: %s", notifier, title)
         if notifier == "pushbullet":
             pushbullet_notify(message, title)
         elif notifier == "pushover":
@@ -905,6 +910,7 @@ class Notifier:
             xmpp_notify(message)
         elif notifier == "gotify":
             gotify_notify(message, title)
+        log.info("Notification sent successfully.")
 
 
 def display_appointments(appointments: list[dict[str, Any]]) -> None:
