@@ -148,7 +148,7 @@ class Authenticator:
                 device_id = device_id_data.get("device_id")
                 if device_id:
                     log.info(f"Using existing device ID: {device_id}")
-                    return device_id
+                    return device_id  # type: ignore[no-any-return]
             except (json.JSONDecodeError, KeyError) as e:
                 log.warning(
                     f"Could not read device ID file, creating a new one. Error: {e}"
@@ -207,7 +207,7 @@ class Authenticator:
         )
         state = uuid.uuid4().hex + uuid.uuid4().hex
 
-        params = {
+        params: dict[str, str | int] = {
             "client_id": "web",
             "redirect_uri": "https://online24.medicover.pl/signin-oidc",
             "response_type": "code",
