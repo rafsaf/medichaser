@@ -99,12 +99,9 @@ log = logging.getLogger("medichaser")
 load_dotenv()
 
 retry_strategy = Retry(
-    total=3,
+    total=10,
     backoff_factor=1,
     status_forcelist=[500, 502, 503, 504],
-    connect=5,
-    read=5,
-    redirect=5,
 )
 global_adapter = HTTPAdapter(max_retries=retry_strategy)
 
@@ -785,7 +782,6 @@ class AppointmentFinder:
 
     def http_get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         response = self.session.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
         if response.status_code in [401, 403]:
             log.error("Unauthorized access error: refreshing token.")
             raise ExpiredToken("Access token expired or invalid")
@@ -795,12 +791,6 @@ class AppointmentFinder:
             log.error(f"Error {response.status_code}: {response.text}")
             return {}
 
-    @tenacity.retry(
-        stop=tenacity.stop_after_attempt(4),
-        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
-        retry=tenacity.retry_if_not_exception_type(ExpiredToken),
-        reraise=True,
-    )
     def find_appointments(
         self,
         region: int,
@@ -845,12 +835,6 @@ class AppointmentFinder:
 
         return items
 
-    @tenacity.retry(
-        stop=tenacity.stop_after_attempt(4),
-        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
-        retry=tenacity.retry_if_not_exception_type(ExpiredToken),
-        reraise=True,
-    )
     def find_filters(
         self, region: int | None = None, specialty: list[int] | None = None
     ) -> dict[str, Any]:
@@ -900,9 +884,9 @@ class Notifier:
 
     @staticmethod
     @tenacity.retry(
-        stop=tenacity.stop_after_attempt(5),
-        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
-        reraise=False,
+        stop=tenacity.stop_after_attempt(10),
+        wait=tenacity.wait_exponential(multiplier=2, min=1),
+        reraise=True,
     )
     def send_notification(
         appointments: list[dict[str, Any]],
