@@ -17,21 +17,27 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
+import base64
 import datetime
+import hashlib
 import json
 import logging
 import os
 import pathlib
+import random
+import re
 import select
+import string
 import sys
 import time
+import uuid
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
+from urllib.parse import parse_qs, urlparse
 
-import requests
-import tenacity
 from dotenv import load_dotenv
 from filelock import FileLock
+import requests
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from rich.logging import RichHandler
@@ -42,6 +48,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
 from urllib3.util import Retry
+import tenacity
 
 from notifications import (
     gotify_notify,
@@ -128,6 +135,175 @@ class Authenticator:
         self.tokenR: str | None = None
         self.expires_at: int | None = None
         self.driver: WebDriver | None = None
+
+    def login_requests(self) -> None:
+        """Login using raw HTTP requests."""
+        log.info("Attempting login via requests.")
+
+        # Step 1: Initial GET to get cookies and CSRF token
+        login_url = "https://login-online24.medicover.pl/Account/Login"
+
+        # PKCE (Proof Key for Code Exchange) Flow
+        code_verifier = "".join(
+            random.choice(string.ascii_uppercase + string.digits) for _ in range(50)
+        )
+        code_challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+            .decode()
+            .replace("=", "")
+        )
+        nonce = uuid.uuid4().hex + uuid.uuid4().hex
+        state = uuid.uuid4().hex + uuid.uuid4().hex
+
+        params = {
+            "client_id": "web",
+            "redirect_uri": "https://online24.medicover.pl/signin-oidc",
+            "response_type": "code",
+            "scope": "openid offline_access profile",
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "response_mode": "query",
+            "nonce": nonce,
+            "state": state,
+        }
+
+        response = self.session.get(login_url, params=params, headers=self.headers)
+        response.raise_for_status()
+
+        # Extract CSRF token from the HTML form
+        match = re.search(
+            r'<input name="__RequestVerificationToken" type="hidden" value="([^"]+)" />',
+            response.text,
+        )
+        if not match:
+            raise ValueError("Could not find CSRF token in login page.")
+        csrf_token = match.group(1)
+
+        # Step 2: POST credentials
+        login_data = {
+            "button": "login",
+            "returnUrl": response.url,
+            "Password": self.password,
+            "Username": self.username,
+            "__RequestVerificationToken": csrf_token,
+        }
+
+        response = self.session.post(
+            "https://login-online24.medicover.pl/Account/Login",
+            data=login_data,
+            headers=self.headers,
+            allow_redirects=False,  # We want to handle redirects manually
+        )
+
+        # Step 3: Handle redirects and potential MFA
+        while response.status_code == 302:
+            redirect_url = response.headers["Location"]
+            log.info(f"Redirecting to: {redirect_url}")
+
+            # Check if redirect is to MFA
+            if "mfa" in redirect_url.lower():
+                response = self._handle_mfa(redirect_url, state)
+                continue
+
+            # Follow the redirect
+            response = self.session.get(
+                redirect_url, headers=self.headers, allow_redirects=False
+            )
+
+            # Check if we have the final code
+            if "code" in redirect_url:
+                parsed_url = urlparse(redirect_url)
+                query_params = parse_qs(parsed_url.query)
+                code = query_params.get("code", [None])[0]
+                if code:
+                    self._exchange_code_for_token(code, code_verifier)
+                    return  # Success!
+
+        # If we are here, something went wrong
+        log.error(f"Login failed. Final status: {response.status_code}")
+        log.error(response.text)
+        raise ValueError("Login failed after handling redirects.")
+
+    def _handle_mfa(self, mfa_url: str, state: str) -> requests.Response:
+        """Handles the MFA step of the login process."""
+        log.info("MFA required.")
+
+        # First, GET the MFA page to get a new CSRF token
+        response = self.session.get(mfa_url, headers=self.headers)
+        response.raise_for_status()
+
+        match = re.search(
+            r'<input name="__RequestVerificationToken" type="hidden" value="([^"]+)" />',
+            response.text,
+        )
+        if not match:
+            raise MFAError("Could not find CSRF token on MFA page.")
+        csrf_token = match.group(1)
+
+        # Prompt user for MFA code
+        log.info("Please enter the MFA code sent to your device and press Enter:")
+        rlist, _, _ = select.select([sys.stdin], [], [], 60)
+        if rlist:
+            mfa_code = sys.stdin.readline().rstrip("\n")
+        else:
+            log.error("Error getting MFA code input: Timeout expired.")
+            raise MFAError("Timeout! Failed to get MFA code input.")
+
+        if len(mfa_code) != 6 or not mfa_code.isdigit():
+            log.error("MFA code must be 6 digits.")
+            raise MFAError("Invalid MFA code format.")
+
+        mfa_data = {
+            "button": "mfa",
+            "code": mfa_code,
+            "rememberMe": "true",  # Option to trust device
+            "returnUrl": mfa_url,
+            "state": state,
+            "__RequestVerificationToken": csrf_token,
+        }
+
+        response = self.session.post(
+            "https://login-online24.medicover.pl/Account/Mfa",
+            data=mfa_data,
+            headers=self.headers,
+            allow_redirects=False,
+        )
+        return response
+
+    def _exchange_code_for_token(self, code: str, code_verifier: str) -> None:
+        """Exchanges the authorization code for an access token."""
+        log.info("Exchanging authorization code for token.")
+        token_data = {
+            "client_id": "web",
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": code_verifier,
+            "redirect_uri": "https://online24.medicover.pl/signin-oidc",
+        }
+
+        response = self.session.post(
+            "https://login-online24.medicover.pl/connect/token",
+            data=token_data,
+            headers=self.headers,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        if "error" in data:
+            raise ValueError(f"Failed to get token: {data['error_description']}")
+
+        expires_in = data.get("expires_in")
+        expires_at = int(time.time()) + expires_in if expires_in else None
+        data["expires_at"] = expires_at
+
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_PATH.write_text(json.dumps(data, indent=4))
+
+        self.tokenA = data.get("access_token")
+        self.tokenR = data.get("refresh_token")
+        self.expires_at = data.get("expires_at")
+        self.headers["Authorization"] = f"Bearer {self.tokenA}"
+        log.info("Successfully obtained and saved tokens.")
 
     def _init_driver(self) -> WebDriver:
         """Initializes the Selenium WebDriver if it's not already running."""
