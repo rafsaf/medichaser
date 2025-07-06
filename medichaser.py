@@ -33,11 +33,12 @@ import time
 import uuid
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
 
+import requests
+import tenacity
 from dotenv import load_dotenv
 from filelock import FileLock
-import requests
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from rich.logging import RichHandler
@@ -48,7 +49,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
 from urllib3.util import Retry
-import tenacity
 
 from notifications import (
     gotify_notify,
@@ -64,6 +64,7 @@ DATA_PATH.mkdir(parents=True, exist_ok=True)
 TOKEN_PATH = DATA_PATH / "medicover_token.json"
 TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
 LOGIN_LOCK_PATH = DATA_PATH / "medicover_login.lock"
+DEVICE_ID_PATH = DATA_PATH / "device_id.json"
 LOG_FILE = DATA_PATH / "medichaser.log"
 
 token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
@@ -117,6 +118,8 @@ class Authenticator:
         self.username = username
         self.password = password
         self.session = requests.Session()
+        self.device_id = self._get_or_create_device_id()
+        self.session.cookies.set("__mcc", self.device_id)
         self.session.mount("https://", global_adapter)
         self.headers: dict[str, str] = {
             "Accept": "application/json",
@@ -130,18 +133,68 @@ class Authenticator:
             "Sec-GPC": "1",
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": "Linux",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
         }
         self.tokenA: str | None = None
         self.tokenR: str | None = None
         self.expires_at: int | None = None
         self.driver: WebDriver | None = None
 
-    def login_requests(self) -> None:
+    def _get_or_create_device_id(self) -> str:
+        """Gets the device ID from storage or creates a new one."""
+        if DEVICE_ID_PATH.exists():
+            try:
+                device_id_data = json.loads(DEVICE_ID_PATH.read_text())
+                device_id = device_id_data.get("device_id")
+                if device_id:
+                    log.info(f"Using existing device ID: {device_id}")
+                    return device_id
+            except (json.JSONDecodeError, KeyError) as e:
+                log.warning(
+                    f"Could not read device ID file, creating a new one. Error: {e}"
+                )
+
+        device_id = str(uuid.uuid4())
+        log.info(f"Creating and saving new device ID: {device_id}")
+        DEVICE_ID_PATH.write_text(json.dumps({"device_id": device_id}))
+        return device_id
+
+    def _load_token_from_storage(self) -> bool:
+        """Loads token from the JSON file if it exists and is valid."""
+        if not TOKEN_PATH.exists():
+            return False
+
+        try:
+            with token_lock:
+                token_data = json.loads(TOKEN_PATH.read_text())
+                self.tokenA = token_data.get("access_token")
+                self.tokenR = token_data.get("refresh_token")
+                self.expires_at = token_data.get("expires_at")
+
+                if not all([self.tokenA, self.tokenR, self.expires_at]):
+                    log.warning("Token file is incomplete. Ignoring.")
+                    TOKEN_PATH.unlink()  # Delete corrupted token file
+                    return False
+
+                if self.expires_at and self.expires_at > int(time.time()):
+                    self.headers["Authorization"] = f"Bearer {self.tokenA}"
+                    log.info("Successfully loaded valid token from storage.")
+                    return True
+                else:
+                    log.info("Token from storage has expired.")
+                    return False
+        except (json.JSONDecodeError, KeyError) as e:
+            log.warning(f"Could not read token file, ignoring. Error: {e}")
+            if TOKEN_PATH.exists():
+                TOKEN_PATH.unlink()
+            return False
+
+    def login_requests(self) -> None:  # pragma: no cover
         """Login using raw HTTP requests."""
         log.info("Attempting login via requests.")
 
         # Step 1: Initial GET to get cookies and CSRF token
-        login_url = "https://login-online24.medicover.pl/Account/Login"
+        login_url = "https://login-online24.medicover.pl"
 
         # PKCE (Proof Key for Code Exchange) Flow
         code_verifier = "".join(
@@ -152,7 +205,6 @@ class Authenticator:
             .decode()
             .replace("=", "")
         )
-        nonce = uuid.uuid4().hex + uuid.uuid4().hex
         state = uuid.uuid4().hex + uuid.uuid4().hex
 
         params = {
@@ -160,51 +212,84 @@ class Authenticator:
             "redirect_uri": "https://online24.medicover.pl/signin-oidc",
             "response_type": "code",
             "scope": "openid offline_access profile",
+            "state": state,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
             "response_mode": "query",
-            "nonce": nonce,
-            "state": state,
+            "ui_locales": "en",
+            "app_version": "3.9.3-beta.1.8",
+            "device_id": self.device_id,
+            "device_name": "Chrome",
+            "ts": int(time.time() * 1000),
         }
 
-        response = self.session.get(login_url, params=params, headers=self.headers)
+        response = self.session.get(
+            f"{login_url}/connect/authorize",
+            params=params,
+            headers=self.headers,
+            allow_redirects=False,
+        )
         response.raise_for_status()
+        next_url = response.headers["Location"]
+        time.sleep(2)
 
+        response = self.session.get(
+            next_url, headers=self.headers, allow_redirects=False
+        )
         # Extract CSRF token from the HTML form
         match = re.search(
             r'<input name="__RequestVerificationToken" type="hidden" value="([^"]+)" />',
             response.text,
         )
         if not match:
-            raise ValueError("Could not find CSRF token in login page.")
+            raise ValueError(
+                "Could not find CSRF token in login page: " + response.text
+            )
         csrf_token = match.group(1)
-
+        parsed_url = urlparse(response.url)
+        query_params = parse_qs(parsed_url.query)
+        return_url = query_params["ReturnUrl"][0]
         # Step 2: POST credentials
         login_data = {
-            "button": "login",
-            "returnUrl": response.url,
-            "Password": self.password,
-            "Username": self.username,
+            "Input.ReturnUrl": return_url,
+            "Input.LoginType": "FullLogin",
+            "Input.Username": self.username,
+            "Input.Password": self.password,
+            "Input.Button": "login",
             "__RequestVerificationToken": csrf_token,
         }
 
+        time.sleep(5)
+
         response = self.session.post(
-            "https://login-online24.medicover.pl/Account/Login",
+            "https://login-online24.medicover.pl/Account/Login?ReturnUrl=" + return_url,
             data=login_data,
-            headers=self.headers,
+            headers={
+                **self.headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            },
             allow_redirects=False,  # We want to handle redirects manually
+        )
+        log.info(
+            f"Login response status: {response.status_code}, text: {response.text}, URL: {response.url}"
         )
 
         # Step 3: Handle redirects and potential MFA
         while response.status_code == 302:
             redirect_url = response.headers["Location"]
+            if not redirect_url.startswith("https://"):
+                redirect_url = login_url + redirect_url
+
             log.info(f"Redirecting to: {redirect_url}")
 
             # Check if redirect is to MFA
             if "mfa" in redirect_url.lower():
-                response = self._handle_mfa(redirect_url, state)
+                log.info("MFA required, handling MFA process.")
+                response = self._handle_mfa(redirect_url)
                 continue
 
+            time.sleep(2)
             # Follow the redirect
             response = self.session.get(
                 redirect_url, headers=self.headers, allow_redirects=False
@@ -224,25 +309,53 @@ class Authenticator:
         log.error(response.text)
         raise ValueError("Login failed after handling redirects.")
 
-    def _handle_mfa(self, mfa_url: str, state: str) -> requests.Response:
+    def _handle_mfa(self, mfa_url: str) -> requests.Response:  # pragma: no cover
         """Handles the MFA step of the login process."""
         log.info("MFA required.")
 
-        # First, GET the MFA page to get a new CSRF token
-        response = self.session.get(mfa_url, headers=self.headers)
+        # Get the MFA page
+        log.info(f"Fetching MFA page: {mfa_url}")
+        time.sleep(2)
+        response = self.session.get(
+            mfa_url,
+            headers=self.headers,
+            allow_redirects=False,
+        )
         response.raise_for_status()
 
+        log.info("Csrf token and MfaCodeId extraction from MFA page.")
+        # Extract CSRF token from the HTML form
         match = re.search(
             r'<input name="__RequestVerificationToken" type="hidden" value="([^"]+)" />',
             response.text,
         )
         if not match:
-            raise MFAError("Could not find CSRF token on MFA page.")
+            raise ValueError("Could not find CSRF token in mfa page: " + response.text)
         csrf_token = match.group(1)
+
+        log.info(f"CSRF token for MFA: {csrf_token}")
+        # Extract MfaCodeId from the cookie
+        log.info("Extracting MfaCodeId from cookies: %s", self.session.cookies)
+
+        mfa_info_cookie_encoded = self.session.cookies.get("MfaInfo")
+        if not mfa_info_cookie_encoded:
+            raise MFAError("MfaInfo cookie not found.")
+
+        mfa_info_cookie = unquote_plus(mfa_info_cookie_encoded)
+
+        log.info(f"MfaInfo cookie: {mfa_info_cookie}")
+        try:
+            mfa_info = json.loads(mfa_info_cookie)
+            mfa_code_id = mfa_info.get("MfaCodeId")
+            if not mfa_code_id:
+                raise MFAError("MfaCodeId not found in MfaInfo cookie.")
+        except json.JSONDecodeError:
+            raise MFAError("Could not decode MfaInfo cookie.")
+        log.info(f"MfaCodeId: {mfa_code_id}")
 
         # Prompt user for MFA code
         log.info("Please enter the MFA code sent to your device and press Enter:")
-        rlist, _, _ = select.select([sys.stdin], [], [], 60)
+        rlist, _, _ = select.select([sys.stdin], [], [], 120)
         if rlist:
             mfa_code = sys.stdin.readline().rstrip("\n")
         else:
@@ -253,24 +366,44 @@ class Authenticator:
             log.error("MFA code must be 6 digits.")
             raise MFAError("Invalid MFA code format.")
 
+        parsed_url = urlparse(mfa_url)
+        query_params = parse_qs(parsed_url.query)
+        return_url = query_params["returnUrl"][0]
+
         mfa_data = {
-            "button": "mfa",
-            "code": mfa_code,
-            "rememberMe": "true",  # Option to trust device
-            "returnUrl": mfa_url,
-            "state": state,
+            "Input.MfaCodeId": mfa_code_id,
+            "Input.ReturnUrl": return_url,
+            "Input.DeviceName": "Chrome",
+            "Input.MfaCode": mfa_code,
+            "Input.IsTrustedDevice": "true",
+            "Input.Channel": "SMS",
+            "Input.Button": "confirm",
             "__RequestVerificationToken": csrf_token,
         }
 
+        log.info("Submitting MFA code: %s", mfa_data)
+        time.sleep(2)
+
         response = self.session.post(
-            "https://login-online24.medicover.pl/Account/Mfa",
+            "https://login-online24.medicover.pl/Account/Mfa?ReturnUrl="
+            + quote_plus(return_url),
             data=mfa_data,
-            headers=self.headers,
+            headers={
+                **self.headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            },
             allow_redirects=False,
         )
+        log.info(
+            f"MFA response status: {response.status_code}, text: {response.text}, URL: {response.url}, headers: {response.headers}"
+        )
+        response.raise_for_status()
         return response
 
-    def _exchange_code_for_token(self, code: str, code_verifier: str) -> None:
+    def _exchange_code_for_token(
+        self, code: str, code_verifier: str
+    ) -> None:  # pragma: no cover
         """Exchanges the authorization code for an access token."""
         log.info("Exchanging authorization code for token.")
         token_data = {
@@ -284,7 +417,10 @@ class Authenticator:
         response = self.session.post(
             "https://login-online24.medicover.pl/connect/token",
             data=token_data,
-            headers=self.headers,
+            headers={
+                **self.headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
         )
         response.raise_for_status()
 
@@ -304,6 +440,35 @@ class Authenticator:
         self.expires_at = data.get("expires_at")
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
         log.info("Successfully obtained and saved tokens.")
+
+    @login_lock
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(2),
+        wait=tenacity.wait_fixed(10),
+        retry=tenacity.retry_if_not_exception_type(MFAError),
+        reraise=True,
+    )
+    def login(self) -> None:
+        """Orchestrates the login process."""
+        try:
+            log.info("Attempting to load token from file.")
+            if self._load_token_from_storage():
+                log.info("Attempting to refresh token.")
+                self.refresh_token()
+                return
+
+        except InvalidGrantError:
+            log.warning(
+                "Token refresh failed with invalid grant. Proceeding to full login."
+            )
+        except Exception as e:
+            log.error(f"An unexpected error occurred during token refresh: {e}")
+
+        # Proceed with full login
+        if os.environ.get("EXPERIMENTAL_SELENIUM_LOGIN"):
+            self.login_selenium()
+        else:
+            self.login_requests()
 
     def _init_driver(self) -> WebDriver:
         """Initializes the Selenium WebDriver if it's not already running."""
@@ -402,7 +567,7 @@ class Authenticator:
         self.expires_at = data.get("expires_at")
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
 
-    def _get_token_from_storage(self) -> bool:
+    def _get_token_from_selenium_storage(self) -> bool:
         """Retrieves token from browser's localStorage."""
         driver = self._init_driver()
         try:
@@ -428,15 +593,9 @@ class Authenticator:
             log.error(driver.page_source)
             return False
 
-    @login_lock
-    @tenacity.retry(
-        stop=tenacity.stop_after_attempt(2),
-        wait=tenacity.wait_fixed(10),
-        retry=tenacity.retry_if_not_exception_type(MFAError),
-        reraise=True,
-    )
-    def login(self) -> None:  # pragma: no cover
+    def login_selenium(self) -> None:  # pragma: no cover
         log.info("No valid saved token found, attempting browser login.")
+        self._quit_driver()
         driver = self._init_driver()
         wait = WebDriverWait(driver, 8)
 
@@ -449,6 +608,7 @@ class Authenticator:
                     EC.url_contains("/Account/Login"),
                     EC.url_contains("/home"),
                     EC.url_contains("signin-oidc"),
+                    EC.url_contains("/signout-callback-oidc"),
                 )
             )
         except Exception:
@@ -464,10 +624,13 @@ class Authenticator:
 
         if "/Account/Login?" in current_url:
             log.info("On login page, proceeding with login.")
+        elif "/signout-callback-oidc" in current_url:
+            log.info("On signout-callback-oidc page, proceeding with login.")
+            driver.get("https://login-online24.medicover.pl/Account/Login")
         else:
             log.info("Already logged in or on a trusted device. Fetching token...")
             time.sleep(5)  # Wait for local storage to be populated
-            if self._get_token_from_storage():
+            if self._get_token_from_selenium_storage():
                 self._quit_driver()
                 return
             else:
@@ -523,7 +686,7 @@ class Authenticator:
         if "/home" in driver.current_url:
             log.info("Redirected to signin-oidc, MFA likely skipped. Fetching token.")
             time.sleep(5)  # Wait for local storage to be populated
-            if self._get_token_from_storage():
+            if self._get_token_from_selenium_storage():
                 self._quit_driver()
                 return
             else:
@@ -574,7 +737,7 @@ class Authenticator:
             raise MFAError("Failed to submit MFA code.")
 
         time.sleep(5)  # Wait for the page to fully load and token to be stored
-        if not self._get_token_from_storage():
+        if not self._get_token_from_selenium_storage():
             log.error("Failed to retrieve token after MFA.")
             self._quit_driver()
             raise MFAError("Failed to retrieve token after MFA.")

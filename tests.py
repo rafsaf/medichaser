@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
+import json
 import typing
 from argparse import Namespace
 from typing import Any
@@ -42,6 +43,12 @@ from notifications import (
     telegram_notify,
     xmpp_notify,
 )
+
+
+@pytest.fixture(autouse=True)
+def fixture_overwrite_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fixture to overwrite time.sleep to avoid actual delays during tests."""
+    monkeypatch.setattr("time.sleep", lambda x: None)
 
 
 class TestAuthenticator:
@@ -163,6 +170,225 @@ class TestAuthenticator:
         mock_stealth.assert_called_once()
         assert driver is not None
         assert "User-Agent" in auth.headers
+
+    def test_get_or_create_device_id_no_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _get_or_create_device_id when no file exists."""
+        mock_device_id_path = Mock()
+        mock_device_id_path.exists.return_value = False
+        mock_device_id_path.write_text = Mock()
+        monkeypatch.setattr("medichaser.DEVICE_ID_PATH", mock_device_id_path)
+        mock_uuid = Mock()
+        mock_uuid.uuid4.return_value = "new-device-id"
+        monkeypatch.setattr("medichaser.uuid", mock_uuid)
+
+        # We need to call __init__ after patching
+        auth = Authenticator("user", "pass")
+
+        assert auth.device_id == "new-device-id"
+        mock_device_id_path.write_text.assert_called_once()
+
+    def test_get_or_create_device_id_file_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _get_or_create_device_id when file exists."""
+        mock_device_id_path = Mock()
+        mock_device_id_path.exists.return_value = True
+        mock_device_id_path.read_text.return_value = (
+            '{"device_id": "existing-device-id"}'
+        )
+        monkeypatch.setattr("medichaser.DEVICE_ID_PATH", mock_device_id_path)
+
+        auth = Authenticator("user", "pass")
+
+        assert auth.device_id == "existing-device-id"
+
+    def test_get_or_create_device_id_corrupted_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _get_or_create_device_id with a corrupted file."""
+        mock_log = Mock()
+        mock_device_id_path = Mock()
+        mock_device_id_path.exists.return_value = True
+        mock_device_id_path.read_text.return_value = "not a json"
+        mock_device_id_path.write_text = Mock()
+        monkeypatch.setattr("medichaser.DEVICE_ID_PATH", mock_device_id_path)
+        monkeypatch.setattr("medichaser.log", mock_log)
+        mock_uuid = Mock()
+        mock_uuid.uuid4.return_value = "new-device-id-after-corruption"
+        monkeypatch.setattr("medichaser.uuid", mock_uuid)
+
+        auth = Authenticator("user", "pass")
+
+        assert auth.device_id == "new-device-id-after-corruption"
+        mock_log.warning.assert_called()
+        mock_device_id_path.write_text.assert_called_once()
+
+    def test_load_token_from_storage_no_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _load_token_from_storage when no token file exists."""
+        mock_token_path = Mock()
+        mock_token_path.exists.return_value = False
+        monkeypatch.setattr("medichaser.TOKEN_PATH", mock_token_path)
+
+        auth = Authenticator("user", "pass")
+        assert not auth._load_token_from_storage()
+
+    def test_load_token_from_storage_valid_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _load_token_from_storage with a valid, non-expired token."""
+        mock_token_path = Mock()
+        mock_token_path.exists.return_value = True
+        token_data = {
+            "access_token": "valid_access",
+            "refresh_token": "valid_refresh",
+            "expires_at": 9999999999,  # Far in the future
+        }
+        mock_token_path.read_text.return_value = json.dumps(token_data)
+        monkeypatch.setattr("medichaser.TOKEN_PATH", mock_token_path)
+
+        auth = Authenticator("user", "pass")
+        assert auth._load_token_from_storage()
+        assert auth.tokenA == "valid_access"
+        assert auth.tokenR == "valid_refresh"
+        assert auth.headers["Authorization"] == "Bearer valid_access"
+
+    def test_load_token_from_storage_expired_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _load_token_from_storage with an expired token."""
+        mock_token_path = Mock()
+        mock_token_path.exists.return_value = True
+        token_data = {
+            "access_token": "expired_access",
+            "refresh_token": "expired_refresh",
+            "expires_at": 1000,  # In the past
+        }
+        mock_token_path.read_text.return_value = json.dumps(token_data)
+        monkeypatch.setattr("medichaser.TOKEN_PATH", mock_token_path)
+        monkeypatch.setattr("medichaser.time.time", lambda: 2000)
+
+        auth = Authenticator("user", "pass")
+        assert not auth._load_token_from_storage()
+
+    def test_load_token_from_storage_corrupted_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _load_token_from_storage with a corrupted JSON file."""
+        mock_token_path = Mock()
+        mock_token_path.exists.return_value = True
+        mock_token_path.read_text.return_value = "invalid json"
+        mock_token_path.unlink = Mock()
+        monkeypatch.setattr("medichaser.TOKEN_PATH", mock_token_path)
+
+        auth = Authenticator("user", "pass")
+        assert not auth._load_token_from_storage()
+        mock_token_path.unlink.assert_called_once()
+
+    def test_load_token_from_storage_incomplete_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test _load_token_from_storage with incomplete token data."""
+        mock_token_path = Mock()
+        mock_token_path.exists.return_value = True
+        token_data = {"access_token": "only_access"}  # Missing other keys
+        mock_token_path.read_text.return_value = json.dumps(token_data)
+        mock_token_path.unlink = Mock()
+        monkeypatch.setattr("medichaser.TOKEN_PATH", mock_token_path)
+
+        auth = Authenticator("user", "pass")
+        assert not auth._load_token_from_storage()
+        mock_token_path.unlink.assert_called_once()
+
+    def test_login_with_valid_stored_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test the main login orchestrator with a valid stored token."""
+        auth = Authenticator("user", "pass")
+        mock_load_token = Mock(return_value=True)
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+
+        auth.login()
+        mock_load_token.assert_called_once()
+
+    def test_login_with_refresh_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test the main login orchestrator with a successful token refresh."""
+        auth = Authenticator("user", "pass")
+        # First call to load is False, second is True after refresh
+        mock_load_token = Mock(side_effect=[False, True])
+        mock_refresh = Mock()
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+        monkeypatch.setattr(auth, "refresh_token", mock_refresh)
+
+        auth.login()
+        assert mock_load_token.call_count == 2
+        mock_refresh.assert_called_once()
+
+    def test_login_fallback_to_selenium_no_load(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test login falls back to Selenium when requests login fails."""
+        auth = Authenticator("user", "pass")
+        mock_load_token = Mock(return_value=False)
+        mock_refresh = Mock()
+        mock_login_requests = Mock(side_effect=Exception("requests failed"))
+        mock_login_selenium = Mock()
+
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+        monkeypatch.setattr(auth, "refresh_token", mock_refresh)
+        monkeypatch.setattr(auth, "login_requests", mock_login_requests)
+        monkeypatch.setattr(auth, "login_selenium", mock_login_selenium)
+        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+
+        auth.login()
+
+        mock_load_token.assert_called_once()
+        mock_refresh.assert_not_called()
+        mock_login_requests.assert_not_called()
+        mock_login_selenium.assert_called_once()
+
+    def test_login_fallback_to_selenium_invalid_grant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test login falls back to Selenium when requests login fails."""
+        auth = Authenticator("user", "pass")
+        mock_load_token = Mock(return_value=True)
+        mock_refresh = Mock(side_effect=InvalidGrantError)
+        mock_login_requests = Mock(side_effect=Exception("requests failed"))
+        mock_login_selenium = Mock()
+
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+        monkeypatch.setattr(auth, "refresh_token", mock_refresh)
+        monkeypatch.setattr(auth, "login_requests", mock_login_requests)
+        monkeypatch.setattr(auth, "login_selenium", mock_login_selenium)
+        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+
+        auth.login()
+
+        mock_load_token.assert_called_once()
+        mock_refresh.assert_called_once()
+        mock_login_requests.assert_not_called()
+        mock_login_selenium.assert_called_once()
+
+    def test_login_method_selenium(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that login uses Selenium when specified."""
+        auth = Authenticator("user", "pass")
+        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+
+        mock_load_token = Mock(return_value=False)
+        mock_refresh = Mock(side_effect=InvalidGrantError)
+        mock_login_selenium = Mock()
+
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+        monkeypatch.setattr(auth, "refresh_token", mock_refresh)
+        monkeypatch.setattr(auth, "login_selenium", mock_login_selenium)
+
+        auth.login()
+
+        mock_login_selenium.assert_called_once()
 
 
 class TestAppointmentFinder:
