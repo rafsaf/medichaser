@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
+
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 # Copyright: (c) 2018, apqlzm - https://github.com/apqlzm/medihunter
 # Copyright: (c) 2025, SteveSteve24 - https://github.com/SteveSteve24/MediCzuwacz
@@ -35,9 +38,11 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
 
+import argcomplete
 import requests
 import tenacity
 from dotenv import load_dotenv
+from fake_useragent import UserAgent
 from filelock import FileLock
 from requests.adapters import HTTPAdapter
 from rich.console import Console
@@ -65,13 +70,17 @@ TOKEN_PATH = DATA_PATH / "medicover_token.json"
 TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
 LOGIN_LOCK_PATH = DATA_PATH / "medicover_login.lock"
 DEVICE_ID_PATH = DATA_PATH / "device_id.json"
+DEVICE_UA_PATH = DATA_PATH / "device_ua.json"
 LOG_FILE = DATA_PATH / "medichaser.log"
+MEDICOVER_LOGIN_URL = "https://login-online24.medicover.pl"
+MEDICOVER_MAIN_URL = "https://online24.medicover.pl"
+MEDICOVER_API_URL = "https://api-gateway-online24.medicover.pl"
 
 token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
 login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
-console = Console()
 
 # Setup logging
+console = Console()
 
 logging.basicConfig(
     level="INFO",
@@ -85,7 +94,6 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("medichaser")
-
 
 # Load environment variables
 load_dotenv()
@@ -103,6 +111,12 @@ global_adapter = HTTPAdapter(max_retries=retry_strategy)
 
 class InvalidGrantError(Exception):
     """Custom exception for invalid_grant error during token refresh."""
+
+    pass
+
+
+class ExpiredToken(Exception):
+    """Retryable custom exception for expired access token."""
 
     pass
 
@@ -126,14 +140,14 @@ class Authenticator:
             "Accept-Encoding": "gzip, deflate, br, zstd",
             "Accept-Language": "pl",
             "Connection": "keep-alive",
-            "Origin": "https://online24.medicover.pl",
+            "Origin": MEDICOVER_MAIN_URL,
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
             "Sec-GPC": "1",
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": "Linux",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "User-Agent": self._get_or_create_ua(),
         }
         self.tokenA: str | None = None
         self.tokenR: str | None = None
@@ -153,11 +167,30 @@ class Authenticator:
                 log.warning(
                     f"Could not read device ID file, creating a new one. Error: {e}"
                 )
-
         device_id = str(uuid.uuid4())
         log.info(f"Creating and saving new device ID: {device_id}")
         DEVICE_ID_PATH.write_text(json.dumps({"device_id": device_id}))
         return device_id
+
+    def _get_or_create_ua(self) -> str:
+        """Gets the device UA from storage or creates a new one."""
+        if DEVICE_UA_PATH.exists():
+            try:
+                device_ua_data = json.loads(DEVICE_UA_PATH.read_text())
+                device_ua = device_ua_data.get("device_ua")
+                if device_ua:
+                    log.info(f"Using existing device UA: {device_ua}")
+                    return device_ua  # type: ignore[no-any-return]
+            except (json.JSONDecodeError, KeyError) as e:
+                log.warning(
+                    f"Could not read device UA file, creating a new one. Error: {e}"
+                )
+        ua = UserAgent(os="Linux")
+
+        device_ua = ua.random
+        log.info(f"Creating and saving new device UA: {device_ua}")
+        DEVICE_UA_PATH.write_text(json.dumps({"device_ua": device_ua}))
+        return device_ua
 
     def _load_token_from_storage(self) -> bool:
         """Loads token from the JSON file if it exists and is valid."""
@@ -194,8 +227,6 @@ class Authenticator:
         log.info("Attempting login via requests.")
 
         # Step 1: Initial GET to get cookies and CSRF token
-        login_url = "https://login-online24.medicover.pl"
-
         # PKCE (Proof Key for Code Exchange) Flow
         code_verifier = "".join(
             random.choice(string.ascii_uppercase + string.digits) for _ in range(50)
@@ -209,7 +240,7 @@ class Authenticator:
 
         params: dict[str, str | int] = {
             "client_id": "web",
-            "redirect_uri": "https://online24.medicover.pl/signin-oidc",
+            "redirect_uri": f"{MEDICOVER_MAIN_URL}/signin-oidc",
             "response_type": "code",
             "scope": "openid offline_access profile",
             "state": state,
@@ -224,7 +255,7 @@ class Authenticator:
         }
 
         response = self.session.get(
-            f"{login_url}/connect/authorize",
+            f"{MEDICOVER_LOGIN_URL}/connect/authorize",
             params=params,
             headers=self.headers,
             allow_redirects=False,
@@ -262,7 +293,7 @@ class Authenticator:
         time.sleep(5)
 
         response = self.session.post(
-            "https://login-online24.medicover.pl/Account/Login?ReturnUrl=" + return_url,
+            f"{MEDICOVER_LOGIN_URL}/Account/Login?ReturnUrl={return_url}",
             data=login_data,
             headers={
                 **self.headers,
@@ -279,7 +310,7 @@ class Authenticator:
         while response.status_code == 302:
             redirect_url = response.headers["Location"]
             if not redirect_url.startswith("https://"):
-                redirect_url = login_url + redirect_url
+                redirect_url = MEDICOVER_LOGIN_URL + redirect_url
 
             log.info(f"Redirecting to: {redirect_url}")
 
@@ -385,8 +416,7 @@ class Authenticator:
         time.sleep(2)
 
         response = self.session.post(
-            "https://login-online24.medicover.pl/Account/Mfa?ReturnUrl="
-            + quote_plus(return_url),
+            f"{MEDICOVER_LOGIN_URL}/Account/Mfa?ReturnUrl={quote_plus(return_url)}",
             data=mfa_data,
             headers={
                 **self.headers,
@@ -411,11 +441,11 @@ class Authenticator:
             "grant_type": "authorization_code",
             "code": code,
             "code_verifier": code_verifier,
-            "redirect_uri": "https://online24.medicover.pl/signin-oidc",
+            "redirect_uri": f"{MEDICOVER_MAIN_URL}/signin-oidc",
         }
 
         response = self.session.post(
-            "https://login-online24.medicover.pl/connect/token",
+            f"{MEDICOVER_LOGIN_URL}/connect/token",
             data=token_data,
             headers={
                 **self.headers,
@@ -492,7 +522,10 @@ class Authenticator:
             ua = self.driver.execute_cdp_cmd("Browser.getVersion", {})[
                 "userAgent"
             ].replace("HeadlessChrome", "Chrome")
-            self.headers["User-Agent"] = ua.replace("HeadlessChrome", "Chrome")
+            self.headers["User-Agent"] = ua
+
+            log.info(f"Creating and saving new device UA: {ua}")
+            DEVICE_UA_PATH.write_text(json.dumps({"device_ua": ua}))
 
             log.info(f"Using User-Agent: {ua}")
 
@@ -533,7 +566,7 @@ class Authenticator:
 
         # Use the refresh token to get a new access token
         response = self.session.post(
-            "https://login-online24.medicover.pl/connect/token",
+            f"{MEDICOVER_LOGIN_URL}/connect/token",
             data=refresh_token_data,
             headers=self.headers,
             allow_redirects=False,
@@ -572,7 +605,7 @@ class Authenticator:
         driver = self._init_driver()
         try:
             token_data = driver.execute_script(
-                "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
+                f"return localStorage.getItem('oidc.user:{MEDICOVER_LOGIN_URL}/:web');"
             )
             if not token_data:
                 log.warning("Token not found in localStorage.")
@@ -599,7 +632,7 @@ class Authenticator:
         driver = self._init_driver()
         wait = WebDriverWait(driver, 8)
 
-        driver.get("https://login-online24.medicover.pl/")
+        driver.get(MEDICOVER_LOGIN_URL)
 
         try:
             # Wait for a URL that indicates we are past the initial redirect
@@ -626,7 +659,7 @@ class Authenticator:
             log.info("On login page, proceeding with login.")
         elif "/signout-callback-oidc" in current_url:
             log.info("On signout-callback-oidc page, proceeding with login.")
-            driver.get("https://login-online24.medicover.pl/Account/Login")
+            driver.get(f"{MEDICOVER_LOGIN_URL}/Account/Login")
         else:
             log.info("Already logged in or on a trusted device. Fetching token...")
             time.sleep(5)  # Wait for local storage to be populated
@@ -752,12 +785,22 @@ class AppointmentFinder:
 
     def http_get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         response = self.session.get(url, headers=self.headers, params=params)
-        if response.status_code == 200:
+        response.raise_for_status()
+        if response.status_code in [401, 403]:
+            log.error("Unauthorized access error: refreshing token.")
+            raise ExpiredToken("Access token expired or invalid")
+        elif response.status_code == 200:
             return cast(dict[str, Any], response.json())
         else:
             log.error(f"Error {response.status_code}: {response.text}")
             return {}
 
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(4),
+        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
+        retry=tenacity.retry_if_not_exception_type(ExpiredToken),
+        reraise=True,
+    )
     def find_appointments(
         self,
         region: int,
@@ -768,7 +811,9 @@ class AppointmentFinder:
         language: int | None,
         doctor: int | None = None,
     ) -> list[dict[str, Any]]:
-        appointment_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/slots"
+        appointment_url = (
+            f"{MEDICOVER_API_URL}/appointments/api/search-appointments/slots"
+        )
         params: dict[str, Any] = {
             "RegionIds": region,
             "SpecialtyIds": specialty,
@@ -800,10 +845,18 @@ class AppointmentFinder:
 
         return items
 
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(4),
+        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
+        retry=tenacity.retry_if_not_exception_type(ExpiredToken),
+        reraise=True,
+    )
     def find_filters(
         self, region: int | None = None, specialty: list[int] | None = None
     ) -> dict[str, Any]:
-        filters_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/filters"
+        filters_url = (
+            f"{MEDICOVER_API_URL}/appointments/api/search-appointments/filters"
+        )
 
         params: dict[str, Any] = {"SlotSearchType": 0}
         if region:
@@ -846,6 +899,11 @@ class Notifier:
         return "\n".join(messages)
 
     @staticmethod
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(5),
+        wait=tenacity.wait_exponential(multiplier=2, min=1, max=10),
+        reraise=False,
+    )
     def send_notification(
         appointments: list[dict[str, Any]],
         notifier: str | None,
@@ -923,6 +981,7 @@ class NextRun:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Find appointment slots.")
+
     subparsers = parser.add_subparsers(
         dest="command", required=True, help="Command to execute"
     )
@@ -1004,6 +1063,7 @@ def main() -> None:
         "-s", "--specialty", required=True, type=int, nargs="+", help="Specialty ID(s)"
     )
 
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     username = os.environ.get("MEDICOVER_USER")
@@ -1032,67 +1092,72 @@ def main() -> None:
         next_run = NextRun(args.interval)
         previous_appointments: list[dict[str, Any]] = []
 
-        while True:
-            # Authenticate
-            try:
-                auth.refresh_token()
-            except InvalidGrantError as e:
-                log.warning(f"Token refresh failed: {e}")
-                log.info("Attempting to re-login...")
-                auth.login()
-                time.sleep(5)
-                log.info("Re-login successful, continuing...")
+        try:
+            while True:
+                # Authenticate
+                try:
+                    auth.refresh_token()
+                except InvalidGrantError as e:
+                    log.warning(f"Token refresh failed: {e}")
+                    log.info("Attempting to re-login...")
+                    auth.login()
+                    time.sleep(5)
+                    log.info("Re-login successful, continuing...")
+                    continue
+
+                if not next_run.is_time_to_run():
+                    time.sleep(30)
+                    continue
+
+                next_run.set_next_run()
+
+                # Find appointments
+                try:
+                    appointments = finder.find_appointments(
+                        args.region,
+                        args.specialty,
+                        args.clinic,
+                        args.date,
+                        args.enddate,
+                        args.language,
+                        args.doctor,
+                    )
+                except ExpiredToken as e:
+                    log.warning("Expired token error: %s", e)
+                    continue
+
+                # Find new appointments
+                if previous_appointments:
+                    new_appointments = [
+                        x for x in appointments if x not in previous_appointments
+                    ]
+                else:
+                    new_appointments = appointments
+
+                previous_appointments = appointments
+
+                # Display appointments
+                display_appointments(new_appointments)
+
+                # Send notification if appointments are found
+                if new_appointments:
+                    Notifier.send_notification(
+                        new_appointments, args.notification, args.title
+                    )
+
+                if next_run.interval_minutes is None:
+                    log.info("Exiting after one run due to interval set to None.")
+                    break
+
                 continue
-            except Exception as e:
-                log.error(f"Error refreshing token: {e}")
-                Notifier.send_notification(
-                    [],
-                    args.notification,
-                    f"medichaser crashed while refreshing token\n: {e}",
-                )
-                raise
-
-            if not next_run.is_time_to_run():
-                time.sleep(30)
-                continue
-
-            next_run.set_next_run()
-
-            # Find appointments
-            appointments = finder.find_appointments(
-                args.region,
-                args.specialty,
-                args.clinic,
-                args.date,
-                args.enddate,
-                args.language,
-                args.doctor,
+        except Exception as e:
+            log.error(f"Error in main loop: {e}")
+            Notifier.send_notification(
+                [],
+                args.notification,
+                f"medichaser crashed during run:\n {e}",
             )
-
-            # Find new appointments
-            if previous_appointments:
-                new_appointments = [
-                    x for x in appointments if x not in previous_appointments
-                ]
-            else:
-                new_appointments = appointments
-
-            previous_appointments = appointments
-
-            # Display appointments
-            display_appointments(new_appointments)
-
-            # Send notification if appointments are found
-            if new_appointments:
-                Notifier.send_notification(
-                    new_appointments, args.notification, args.title
-                )
-
-            if next_run.interval_minutes is None:
-                log.info("Exiting after one run due to interval set to None.")
-                break
-
-            continue
+            raise
 
     elif args.command == "list-filters":
         # Authenticate

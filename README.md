@@ -18,6 +18,8 @@ The application is designed to be run in a Docker container and includes a `ttyd
 - Sends notifications via Gotify, Telegram, Pushbullet, Pushover, and XMPP.
 - Remote management through an integrated `ttyd` web terminal.
 - Persistent data storage for sessions, tokens, and logs.
+- Bullet proof design - created for long runs.
+- Shell autocomplete for `medichaser.py`.
 
 ---
 

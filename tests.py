@@ -158,7 +158,11 @@ class TestAuthenticator:
 
     def test_init_driver(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test the _init_driver method."""
-        mock_chrome = MagicMock()
+        mock_chrome_instance = MagicMock()
+        mock_chrome_instance.execute_cdp_cmd.return_value = {
+            "userAgent": "Chrome User-Agent"
+        }
+        mock_chrome = MagicMock(return_value=mock_chrome_instance)
         monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
         mock_stealth = MagicMock()
         monkeypatch.setattr("medichaser.stealth", mock_stealth)

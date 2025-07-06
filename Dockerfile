@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get -y update && apt-get -y install wget tini git nano vim procps screen
+    apt-get -y update && apt-get -y install wget tini git nano vim procps screen bash-completion
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
 RUN chmod +x /usr/bin/ttyd
 
@@ -51,6 +51,8 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
 
 # this resolves permissions issues in local env
 RUN mkdir -p /app/data && chmod 777 /app/data
+
+RUN activate-global-python-argcomplete -y
 
 USER medichaser
 
