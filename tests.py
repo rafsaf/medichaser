@@ -341,7 +341,7 @@ class TestAuthenticator:
         monkeypatch.setattr(auth, "refresh_token", mock_refresh)
         monkeypatch.setattr(auth, "login_requests", mock_login_requests)
         monkeypatch.setattr(auth, "login_selenium", mock_login_selenium)
-        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+        monkeypatch.setenv("SELENIUM_LOGIN", "1")
 
         auth.login()
 
@@ -364,7 +364,7 @@ class TestAuthenticator:
         monkeypatch.setattr(auth, "refresh_token", mock_refresh)
         monkeypatch.setattr(auth, "login_requests", mock_login_requests)
         monkeypatch.setattr(auth, "login_selenium", mock_login_selenium)
-        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+        monkeypatch.setenv("SELENIUM_LOGIN", "1")
 
         auth.login()
 
@@ -376,7 +376,7 @@ class TestAuthenticator:
     def test_login_method_selenium(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that login uses Selenium when specified."""
         auth = Authenticator("user", "pass")
-        monkeypatch.setenv("EXPERIMENTAL_SELENIUM_LOGIN", "1")
+        monkeypatch.setenv("SELENIUM_LOGIN", "1")
 
         mock_load_token = Mock(return_value=False)
         mock_refresh = Mock(side_effect=InvalidGrantError)

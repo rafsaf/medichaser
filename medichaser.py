@@ -465,7 +465,7 @@ class Authenticator:
             log.error(f"An unexpected error occurred during token refresh: {e}")
 
         # Proceed with full login
-        if os.environ.get("EXPERIMENTAL_SELENIUM_LOGIN"):
+        if os.environ.get("SELENIUM_LOGIN"):
             self.login_selenium()
         else:
             self.login_requests()

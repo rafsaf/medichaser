@@ -14,7 +14,7 @@ The application is designed to be run in a Docker container and includes a `ttyd
 ## Features
 
 - Search for appointments by region, specialty, clinic, doctor, date range, and language at a configurable interval.
-- Handles MFA by using a persistent Selenium browser profile.
+- Handles Multi-Factor Authentication (MFA).
 - Sends notifications via Gotify, Telegram, Pushbullet, Pushover, and XMPP.
 - Remote management through an integrated `ttyd` web terminal.
 - Persistent data storage for sessions, tokens, and logs.
@@ -23,9 +23,12 @@ The application is designed to be run in a Docker container and includes a `ttyd
 
 ## How It Works
 
-MediChaser uses Selenium Stealth to control a headless Chrome browser, automating user interactions on the Medicover website. This makes it capable of handling interactive login flows, including MFA.
+MediChaser automates Medicover interactions using two login methods, both supporting Multi-Factor Authentication (MFA):
 
-By storing the browser profile in a persistent Docker volume, subsequent logins are often treated as trusted, reducing the need for repeated MFA challenges. The included `ttyd` service provides command-line access to the container via a web browser.
+-   **Direct HTTP Requests (Default)**: Fast and efficient, interacting directly with the Medicover API.
+-   **Selenium-based Login**: An alternative using a headless browser, which can be enabled with the `SELENIUM_LOGIN` environment variable.
+
+The included `ttyd` service provides command-line access to the container via a web browser.
 
 ---
 
@@ -131,6 +134,24 @@ All commands are run from the web terminal.
     python medichaser.py find-appointment -r 204 -s 132 -i 15 -n gotify -t "Pediatra Warszawa"
     ```
 
+    To run the monitoring process in the background within the web terminal, you can use `screen`:
+
+    1. Start a new screen session:
+
+        ```bash
+        screen -S medichaser
+        ```
+
+    2. Run your command with the interval (`-i`) option.
+    3. Detach from the session by pressing `Ctrl+A` then `D`. The command will keep running.
+    4. To re-attach to the session later, run:
+
+        ```bash
+        screen -r medichaser
+        ```
+
+    For more information on using screen, check out this [guide](https://www.gnu.org/software/screen/manual/screen.html).
+
 ---
 
 ## Notifications Setup
@@ -162,6 +183,17 @@ Add the required environment variables for your preferred service to the `.env` 
 - `NOTIFIERS_XMPP_JID`: Your full JID (`user@example.com`).
 - `NOTIFIERS_XMPP_PASSWORD`: Your password.
 - `NOTIFIERS_XMPP_RECEIVER`: The recipient's JID.
+
+---
+
+## Security Considerations
+
+The integrated `ttyd` web terminal provides convenient access to the container's command line. If you are hosting this service on a publicly accessible server, it is crucial to secure the web terminal to prevent unauthorized access.
+
+You can secure `ttyd` by:
+
+- **Using `ttyd`'s built-in authentication**: Change default CMD to enable basic authentication when running container.
+- **Using a reverse proxy**: Place a reverse proxy like Nginx or Traefik in front of the `ttyd` service to handle authentication and SSL/TLS termination.
 
 ---
 
