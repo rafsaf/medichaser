@@ -1060,7 +1060,13 @@ def main() -> None:
         sys.exit(1)
 
     auth = Authenticator(username, password)
-    auth.login()
+    try:
+        auth.login()
+    except MFAError:
+        log.error("Failed MFA, please try again.")
+        DEVICE_ID_PATH.unlink(missing_ok=True)
+        raise
+
     time.sleep(5)
 
     finder = AppointmentFinder(auth.session, auth.headers)
