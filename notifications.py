@@ -27,6 +27,26 @@ pushbullet = get_notifier("pushbullet")
 pushover = get_notifier("pushover")
 telegram = get_notifier("telegram")
 
+def prowl_notify(message: str, title: str | None = None) -> None:
+    if not environ.get("NOTIFIERS_PROWL_API_KEY"):
+        print(
+            "Prowl notifications require NOTIFIERS_PROWL_API_KEY environment to be exported.",
+        )
+        return
+
+    url = "https://api.prowlapp.com/publicapi/add"
+    payload = {
+        "apikey": environ.get("NOTIFIERS_PROWL_API_KEY", ""),
+        "priority": -1,
+        "application": title or "MediChaser",
+        "event": "Alert",
+        "description": message,
+    }
+    try:
+        response = requests.post(url=url, data=payload, timeout=3)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Prowl notification failed:\n{e}")
 
 def pushbullet_notify(message: str, title: str | None = None) -> None:
     try:

@@ -15,7 +15,7 @@ The application is designed to be run in a Docker container and includes a `ttyd
 
 - Search for appointments by region, specialty, clinic, doctor, date range, and language at a configurable interval.
 - Handles Multi-Factor Authentication (MFA).
-- Sends notifications via Gotify, Telegram, Pushbullet, Pushover, and XMPP.
+- Sends notifications via Gotify, Telegram, Pushbullet, Pushover, Prowl and XMPP.
 - Remote management through an integrated `ttyd` web terminal.
 - Persistent data storage for sessions, tokens, and logs.
 - Bullet proof design - created for long runs.
@@ -179,6 +179,10 @@ Add the required environment variables for your preferred service to the `.env` 
 ### Pushbullet
 
 - `NOTIFIERS_PUSHBULLET_TOKEN`: Your access token.
+
+### Prowl
+
+- `NOTIFIERS_PROWL_API_KEY`: Your API key.
 
 ### XMPP (Jabber)
 

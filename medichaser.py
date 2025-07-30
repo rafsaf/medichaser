@@ -57,6 +57,7 @@ from urllib3.util import Retry
 
 from notifications import (
     gotify_notify,
+    prowl_notify
     pushbullet_notify,
     pushover_notify,
     telegram_notify,
@@ -910,6 +911,8 @@ class Notifier:
             xmpp_notify(message)
         elif notifier == "gotify":
             gotify_notify(message, title)
+        elif notifier == "prowl":
+            prowl_notify(message, title)
         log.info("Notification sent successfully.")
 
 
