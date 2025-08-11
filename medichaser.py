@@ -57,7 +57,7 @@ from urllib3.util import Retry
 
 from notifications import (
     gotify_notify,
-    prowl_notify
+    prowl_notify,
     pushbullet_notify,
     pushover_notify,
     telegram_notify,
