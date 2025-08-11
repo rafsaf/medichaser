@@ -1,4 +1,4 @@
-name: docker_build
+name: docker_build_and_tests
 on:
   push:
     branches:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  docker_build:
+  docker_build_and_tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

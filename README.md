@@ -3,7 +3,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/rafsaf/medichaser.svg)](https://hub.docker.com/r/rafsaf/medichaser)
 [![Latest release](https://img.shields.io/github/v/release/rafsaf/medichaser)](https://github.com/rafsaf/medichaser/releases/latest)
 
-MediChaser is a tool for automating Medicover appointment searches. It uses Selenium to interact with the Medicover website, handling login and MFA, and sends notifications when appointments are found.
+MediChaser is a tool for automating Medicover appointment searches. It interacts with the Medicover website, handles login and MFA, and sends notifications when appointments are found.
 
 The application is designed to be run in a Docker container and includes a `ttyd` web terminal for remote management.
 
@@ -200,6 +200,20 @@ You can secure `ttyd` by:
 
 - **Using `ttyd`'s built-in authentication**: Change default CMD to enable basic authentication when running container.
 - **Using a reverse proxy**: Place a reverse proxy like Nginx or Traefik in front of the `ttyd` service to handle authentication and SSL/TLS termination.
+
+---
+
+## Development
+
+```bash
+# 1. install poetry
+poetry install
+# 2. hack
+# 3. lint directly or install pre-commit hooks with poetry run pre-commit install
+poetry run pre-commit run -a
+# 4. run tests
+poetry run pytest
+```
 
 ---
 

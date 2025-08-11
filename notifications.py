@@ -27,6 +27,7 @@ pushbullet = get_notifier("pushbullet")
 pushover = get_notifier("pushover")
 telegram = get_notifier("telegram")
 
+
 def prowl_notify(message: str, title: str | None = None) -> None:
     if not environ.get("NOTIFIERS_PROWL_API_KEY"):
         print(
@@ -47,6 +48,7 @@ def prowl_notify(message: str, title: str | None = None) -> None:
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Prowl notification failed:\n{e}")
+
 
 def pushbullet_notify(message: str, title: str | None = None) -> None:
     try:

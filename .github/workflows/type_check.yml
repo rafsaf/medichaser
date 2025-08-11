@@ -5,6 +5,9 @@ on:
       - "**"
     tags-ignore:
       - "*.*"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   actions: write

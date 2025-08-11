@@ -11,6 +11,6 @@ services:
       - medichaser_data:/app/data
     ports:
       - 7681:7681
-
+    platform: "linux/amd64"
 volumes:
   medichaser_data:
