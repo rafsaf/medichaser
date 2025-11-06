@@ -130,6 +130,14 @@ All commands are run from the web terminal.
     python medichaser.py find-appointment -r 204 -s 112 -l 60
     ```
 
+- **Search diagnostic procedures** (set slot search type):
+
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 132 -S DiagnosticProcedure
+    ```
+
+    Use `-S`/`--slot-search-type` to override the default slot search type.
+
 - **Continuous monitoring and notifications**:
 
     ```bash
