@@ -26,6 +26,7 @@ import requests
 from notifiers.exceptions import BadArguments
 
 from medichaser import (
+    DEFAULT_SLOT_SEARCH_TYPE,
     AppointmentFinder,
     Authenticator,
     InvalidGrantError,
@@ -460,6 +461,10 @@ class TestAppointmentFinder:
 
         assert result == [{"id": 1}, {"id": 2}]
         mock_http_get.assert_called_once()
+        call_args = mock_http_get.call_args
+        assert call_args is not None
+        params: dict[str, Any] = call_args.args[1]
+        assert params["SlotSearchType"] == DEFAULT_SLOT_SEARCH_TYPE
 
     def test_find_appointments_with_filters(
         self, monkeypatch: pytest.MonkeyPatch
@@ -486,6 +491,7 @@ class TestAppointmentFinder:
         call_args = mock_http_get.call_args
         assert call_args is not None
         params: dict[str, Any] = call_args.args[1]
+        assert params["SlotSearchType"] == DEFAULT_SLOT_SEARCH_TYPE
         assert "DoctorLanguageIds" in params
         assert "DoctorIds" in params
 
@@ -534,6 +540,10 @@ class TestAppointmentFinder:
 
         assert result == {"regions": [{"id": 1}]}
         mock_http_get.assert_called_once()
+        call_args = mock_http_get.call_args
+        assert call_args is not None
+        params: dict[str, Any] = call_args.args[1]
+        assert params["SlotSearchType"] == DEFAULT_SLOT_SEARCH_TYPE
 
 
 class TestNotifier:
@@ -1099,6 +1109,7 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
         interval=None,
         notification="pushbullet",
         title="Test",
+        slot_search_type="DiagnosticProcedure",
     )
 
     mock_parser = MagicMock()
@@ -1133,7 +1144,14 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     mock_auth_instance.login.assert_called_once()
     mock_auth_instance.refresh_token.assert_called_once()
     mock_finder_instance.find_appointments.assert_called_once_with(
-        1, [2], 3, datetime.date(2025, 1, 1), datetime.date(2025, 1, 31), 6, 4
+        1,
+        [2],
+        3,
+        datetime.date(2025, 1, 1),
+        datetime.date(2025, 1, 31),
+        6,
+        4,
+        "DiagnosticProcedure",
     )
     mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
     mock_notifier.assert_called_once_with(
@@ -1248,6 +1266,7 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
         interval=10,
         notification="pushover",
         title="Interval Test",
+        slot_search_type=DEFAULT_SLOT_SEARCH_TYPE,
     )
 
     mock_parser = MagicMock()

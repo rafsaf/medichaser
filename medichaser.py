@@ -77,6 +77,8 @@ MEDICOVER_LOGIN_URL = "https://login-online24.medicover.pl"
 MEDICOVER_MAIN_URL = "https://online24.medicover.pl"
 MEDICOVER_API_URL = "https://api-gateway-online24.medicover.pl"
 
+DEFAULT_SLOT_SEARCH_TYPE: int = 0
+
 token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
 login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
 
@@ -801,6 +803,7 @@ class AppointmentFinder:
         end_date: datetime.date | None,
         language: int | None,
         doctor: int | None = None,
+        slot_search_type: int | str = DEFAULT_SLOT_SEARCH_TYPE,
     ) -> list[dict[str, Any]]:
         appointment_url = (
             f"{MEDICOVER_API_URL}/appointments/api/search-appointments/slots"
@@ -812,7 +815,7 @@ class AppointmentFinder:
             "Page": 1,
             "PageSize": 5000,
             "StartTime": start_date.isoformat(),
-            "SlotSearchType": 0,
+            "SlotSearchType": slot_search_type,
             "VisitType": "Center",
         }
 
@@ -837,13 +840,16 @@ class AppointmentFinder:
         return items
 
     def find_filters(
-        self, region: int | None = None, specialty: list[int] | None = None
+        self,
+        region: int | None = None,
+        specialty: list[int] | None = None,
+        slot_search_type: int | str = DEFAULT_SLOT_SEARCH_TYPE,
     ) -> dict[str, Any]:
         filters_url = (
             f"{MEDICOVER_API_URL}/appointments/api/search-appointments/filters"
         )
 
-        params: dict[str, Any] = {"SlotSearchType": 0}
+        params: dict[str, Any] = {"SlotSearchType": slot_search_type}
         if region:
             params["RegionIds"] = region
         if specialty:
@@ -950,6 +956,13 @@ def json_date_serializer(obj: Any) -> str:
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def parse_slot_search_type(value: str) -> int | str:
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
 class NextRun:
     def __init__(self, interval_minutes: int | None = 60) -> None:
         self.next_run = datetime.datetime.now(tz=datetime.UTC)
@@ -1032,6 +1045,13 @@ def main() -> None:
         type=int,
         default=None,
         help="Repeat interval in minutes",
+    )
+    find_appointment.add_argument(
+        "-S",
+        "--slot-search-type",
+        default=DEFAULT_SLOT_SEARCH_TYPE,
+        type=parse_slot_search_type,
+        help='Slot search type (e.g. "0", "DiagnosticProcedure"). Default: 0',
     )
 
     list_filters = subparsers.add_parser("list-filters", help="List filters")
@@ -1120,6 +1140,7 @@ def main() -> None:
                         args.enddate,
                         args.language,
                         args.doctor,
+                        args.slot_search_type,
                     )
                 except ExpiredToken as e:
                     log.warning("Expired token error: %s", e)
