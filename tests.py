@@ -612,7 +612,9 @@ class TestNotifier:
         appointments: list[dict[str, Any]] = [
             {"appointmentDate": "2025-01-01T10:00:00"}
         ]
-        Notifier.send_notification(appointments, "pushbullet", "Test Title")
+        Notifier.send_notification(
+            "pushbullet", "Test Title", appointments=appointments
+        )
 
         mock_pushbullet.assert_called_once()
         args, kwargs = mock_pushbullet.call_args
@@ -626,9 +628,49 @@ class TestNotifier:
         appointments: list[dict[str, Any]] = [
             {"appointmentDate": "2025-01-01T10:00:00"}
         ]
-        Notifier.send_notification(appointments, "telegram", "Test Title")
+        Notifier.send_notification("telegram", "Test Title", appointments=appointments)
 
         mock_telegram.assert_called_once()
+
+    def test_send_notification_with_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with custom message."""
+        mock_pushbullet = Mock()
+        monkeypatch.setattr("medichaser.pushbullet_notify", mock_pushbullet)
+
+        Notifier.send_notification("pushbullet", "Test Title", message="Custom message")
+
+        mock_pushbullet.assert_called_once_with("Custom message", "Test Title")
+
+    def test_send_notification_no_notifier(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with no notifier specified."""
+        mock_log = Mock()
+        monkeypatch.setattr("medichaser.log", mock_log)
+
+        appointments: list[dict[str, Any]] = [
+            {"appointmentDate": "2025-01-01T10:00:00"}
+        ]
+        Notifier.send_notification(None, "Test Title", appointments=appointments)
+
+        mock_log.info.assert_called_once_with(
+            "No notifier specified, skipping notification."
+        )
+
+    def test_send_notification_no_message_or_appointments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with neither message nor appointments."""
+        mock_log = Mock()
+        monkeypatch.setattr("medichaser.log", mock_log)
+
+        Notifier.send_notification("pushbullet", "Test Title")
+
+        mock_log.warning.assert_called_once_with(
+            "No message or appointments provided for notification."
+        )
 
 
 class TestNextRun:
@@ -1155,7 +1197,7 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     )
     mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
     mock_notifier.assert_called_once_with(
-        [{"id": 1, "name": "Appointment"}], "pushbullet", "Test"
+        "pushbullet", "Test", appointments=[{"id": 1, "name": "Appointment"}]
     )
 
 
@@ -1323,12 +1365,12 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
 
     mock_display.assert_any_call([{"id": 1, "name": "Appointment 1"}])
     mock_notifier.assert_any_call(
-        [{"id": 1, "name": "Appointment 1"}], "pushover", "Interval Test"
+        "pushover", "Interval Test", appointments=[{"id": 1, "name": "Appointment 1"}]
     )
 
     mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
     mock_notifier.assert_any_call(
-        [{"id": 2, "name": "Appointment 2"}], "pushover", "Interval Test"
+        "pushover", "Interval Test", appointments=[{"id": 2, "name": "Appointment 2"}]
     )
 
 

@@ -61,4 +61,5 @@ source = ["."]
 
 [tool.pytest.ini_options]
 addopts = "-vv -n auto --cov --cov-report xml --cov-report term-missing --cov-fail-under=80"
+filterwarnings = ["ignore:invalid escape sequence:SyntaxWarning"]
 testpaths = ["tests.py"]

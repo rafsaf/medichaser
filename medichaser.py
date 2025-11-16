@@ -896,12 +896,26 @@ class Notifier:
         reraise=True,
     )
     def send_notification(
-        appointments: list[dict[str, Any]],
         notifier: str | None,
         title: str | None,
+        appointments: list[dict[str, Any]] | None = None,
+        message: str | None = None,
     ) -> None:
-        """Send a notification with formatted appointments."""
-        message = Notifier.format_appointments(appointments)
+        """Send a notification with formatted appointments or custom message.
+
+        Args:
+            notifier: The notification service to use (e.g., 'pushbullet', 'telegram').
+            title: The notification title.
+            appointments: Optional list of appointments to format and send.
+            message: Optional custom message to send. If both appointments and message
+                    are provided, message takes precedence.
+        """
+        if message is None:
+            if appointments is None:
+                log.warning("No message or appointments provided for notification.")
+                return
+            message = Notifier.format_appointments(appointments)
+
         if notifier is None:
             log.info("No notifier specified, skipping notification.")
             return
@@ -1103,9 +1117,9 @@ def main() -> None:
     if args.command == "find-appointment":
         if args.interval is not None:
             Notifier.send_notification(
-                [],
                 args.notification,
-                f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
+                "Medichaser start",
+                message=f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
             )
 
         next_run = NextRun(args.interval)
@@ -1162,7 +1176,7 @@ def main() -> None:
                 # Send notification if appointments are found
                 if new_appointments:
                     Notifier.send_notification(
-                        new_appointments, args.notification, args.title
+                        args.notification, args.title, appointments=new_appointments
                     )
 
                 if next_run.interval_minutes is None:
@@ -1173,9 +1187,9 @@ def main() -> None:
         except Exception as e:
             log.error(f"Error in main loop: {e}")
             Notifier.send_notification(
-                [],
                 args.notification,
-                f"medichaser crashed during run:\n {e}",
+                "Medichaser error",
+                message=f"medichaser crashed during run:\n {e}",
             )
             raise
 
@@ -1192,9 +1206,9 @@ def main() -> None:
         except Exception as e:
             log.error(f"Error refreshing token: {e}")
             Notifier.send_notification(
-                [],
                 args.notification,
-                f"medichaser crashed while refreshing token\n: {e}",
+                "Medichaser error",
+                message=f"medichaser crashed while refreshing token\n: {e}",
             )
             raise
         if args.filter_type in ("doctors", "clinics"):
