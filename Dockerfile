@@ -13,6 +13,7 @@ RUN groupadd --gid 1000 medichaser && useradd -m --uid 1000 --gid 1000 -s /bin/b
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
 RUN apt-get update && apt-get install -y \
     wget \
+    gnupg \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update && apt-get install -y google-chrome-stable \
