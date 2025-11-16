@@ -65,8 +65,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           file: Dockerfile
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
           target: app
           context: .
           push: ${{ github.event_name != 'pull_request' }}
