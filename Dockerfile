@@ -13,24 +13,9 @@ RUN groupadd --gid 1000 medichaser && useradd -m --uid 1000 --gid 1000 -s /bin/b
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
 RUN apt-get update && apt-get install -y \
     wget \
-    gnupg \
-    unzip \
-    libnss3 \
-    libxss1 \
-    libappindicator1 \
-    fonts-liberation \
-    libgbm-dev \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    # For headless Chrome specifically, if you encounter issues
-    # xvfb # if using xvfb to run graphical applications
-    # xauth # if using xvfb
-    # Add Google Chrome repository
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update && apt-get install -y google-chrome-stable \
-    # Clean up apt caches to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS uv
