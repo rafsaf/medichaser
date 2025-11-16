@@ -214,13 +214,13 @@ You can secure `ttyd` by:
 ## Development
 
 ```bash
-# 1. install poetry
-poetry install
+# 1. install uv (see https://docs.astral.sh/uv/)
+uv sync
 # 2. hack
-# 3. lint directly or install pre-commit hooks with poetry run pre-commit install
-poetry run pre-commit run -a
+# 3. lint directly or install pre-commit hooks with uv run pre-commit install
+uv run pre-commit run -a
 # 4. run tests
-poetry run pytest
+uv run pytest
 ```
 
 ---
