@@ -3,9 +3,7 @@ FROM python:3.14-slim-trixie AS base
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get -y update && apt-get -y install wget tini git nano vim procps screen bash-completion
+RUN apt-get -y update && apt-get -y install wget tini git nano vim procps screen bash-completion
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
 RUN chmod +x /usr/bin/ttyd
 
@@ -13,9 +11,7 @@ RUN groupadd --gid 1000 medichaser && useradd -m --uid 1000 --gid 1000 -s /bin/b
 
 # Install Chrome and its dependencies
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
@@ -46,7 +42,7 @@ RUN uv export --only-group dev --no-hashes -o /requirements-dev.txt --no-install
 FROM base AS app
 
 COPY --from=uv /requirements.txt /requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
+RUN pip install -r /requirements.txt
 
 # this resolves permissions issues in local env
 RUN mkdir -p /app/data && chmod 777 /app/data
@@ -69,7 +65,7 @@ CMD ["ttyd", "-W", "bash"]
 FROM app AS tests
 USER root
 COPY --from=uv /requirements-dev.txt /requirements-dev.txt
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements-dev.txt
+RUN pip install -r /requirements-dev.txt
 COPY pyproject.toml tests.py ./
 
 ENTRYPOINT []
