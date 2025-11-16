@@ -37,16 +37,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # Clean up apt caches to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
-FROM base AS poetry
-RUN --mount=type=cache,target=/root/.cache/pip pip install poetry==2.0.1
-RUN --mount=type=cache,target=/root/.cache/pip poetry self add poetry-plugin-export
-COPY poetry.lock pyproject.toml ./
-RUN poetry export -o  /requirements.txt --without-hashes
-RUN poetry export -o  /requirements-dev.txt --without-hashes --with dev
+FROM base AS uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.2 /uv /uvx /bin/
+COPY uv.lock pyproject.toml ./
+RUN uv export --no-dev --no-hashes -o /requirements.txt --no-install-workspace --frozen
+RUN uv export --only-group dev --no-hashes -o /requirements-dev.txt --no-install-workspace --frozen
 
 FROM base AS app
 
-COPY --from=poetry /requirements.txt /requirements.txt
+COPY --from=uv /requirements.txt /requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
 
 # this resolves permissions issues in local env
@@ -69,7 +68,7 @@ CMD ["ttyd", "-W", "bash"]
 
 FROM app AS tests
 USER root
-COPY --from=poetry /requirements-dev.txt /requirements-dev.txt
+COPY --from=uv /requirements-dev.txt /requirements-dev.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements-dev.txt
 COPY pyproject.toml tests.py ./
 

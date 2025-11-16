@@ -1,13 +1,45 @@
-[tool.poetry]
+[project]
 authors = []
+dependencies = [
+    "argcomplete>=3.6.2,<4",
+    "fake-useragent>=2.2.0,<3",
+    "filelock>=3.18.0",
+    "lxml>=6.0.2",
+    "notifiers>=1.3.6",
+    "python-dotenv>=1.1.1",
+    "requests>=2.32.4",
+    "rich>=14.0.0",
+    "selenium-stealth>=1.0.6",
+    "selenium>=4.34.0",
+    "tenacity>=9.1.2",
+    "xmpppy>=0.7.1",
+]
 description = "medihunter fork"
-license = "GNU GPLv3"
+license = "GPL-3.0-or-later"
 name = "medichaser"
 readme = "README.md"
+requires-python = ">=3.13,<3.14"
 version = "0.5.0"
+
+[project.scripts]
+medichaser = "medichaser:medichaser"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.16.1,<2",
+    "pytest-cov>=6.2.1,<7",
+    "pytest-xdist>=3.8.0,<4",
+    "pytest>=8.4.1,<9",
+    "ruff>=0.12.1",
+    "types-requests>=2.32.0.20240712,<3",
+]
 
 [tool.ruff]
 target-version = "py313"
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [tool.ruff.lint]
 # pycodestyle, pyflakes, isort, pylint, pyupgrade
@@ -17,32 +49,6 @@ select = ["E", "F", "I", "PL", "UP", "W"]
 [tool.ruff.lint.pylint]
 max-args = 12
 max-branches = 20
-
-[tool.poetry.dependencies]
-argcomplete = "^3.6.2"
-fake-useragent = "^2.2.0"
-filelock = ">=3.18.0"
-lxml = ">=6.0.0"
-notifiers = ">=1.3.6"
-python = ">=3.13"
-python-dotenv = ">=1.1.1"
-requests = ">=2.32.4"
-rich = ">=14.0.0"
-selenium = ">=4.34.0"
-selenium-stealth = ">=1.0.6"
-tenacity = ">=9.1.2"
-xmpppy = ">=0.7.1"
-
-[tool.poetry.scripts]
-medichaser = "medichaser:medichaser"
-
-[tool.poetry.group.dev.dependencies]
-mypy = "^1.16.1"
-pytest = "^8.4.1"
-pytest-cov = "^6.2.1"
-pytest-xdist = "^3.8.0"
-ruff = ">=0.12.1"
-types-requests = "^2.32.0.20240712"
 
 [tool.mypy]
 ignore_missing_imports = true
@@ -56,7 +62,3 @@ source = ["."]
 [tool.pytest.ini_options]
 addopts = "-vv -n auto --cov --cov-report xml --cov-report term-missing --cov-fail-under=80"
 testpaths = ["tests.py"]
-
-[build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry-core>=1.0.0"]

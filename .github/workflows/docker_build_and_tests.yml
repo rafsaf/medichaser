@@ -18,7 +18,7 @@ jobs:
   docker_build_and_tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -49,7 +49,7 @@ jobs:
         id: cache
         with:
           path: cache-mount
-          key: cache-mount-${{ runner.os }}-${{ hashFiles('Dockerfile') }}
+          key: cache-mount-${{ runner.os }}-${{ hashFiles('Dockerfile', 'uv.lock') }}
           restore-keys: |
             cache-mount-${{ runner.os }}-
 
