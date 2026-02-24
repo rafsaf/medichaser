@@ -47,9 +47,9 @@ from filelock import FileLock
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from rich.logging import RichHandler
-from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.webdriver import WebDriver as ChromeDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
@@ -152,7 +152,7 @@ class Authenticator:
         self.tokenA: str | None = None
         self.tokenR: str | None = None
         self.expires_at: int | None = None
-        self.driver: WebDriver | None = None
+        self.driver: ChromeDriver | None = None
 
     def _get_or_create_device_id(self) -> str:
         """Gets the device ID from storage or creates a new one."""
@@ -511,16 +511,16 @@ class Authenticator:
         else:
             self.login_requests()
 
-    def _init_driver(self) -> WebDriver:
-        """Initializes the Selenium WebDriver if it's not already running."""
+    def _init_driver(self) -> ChromeDriver:
+        """Initializes the Selenium ChromeDriver if it's not already running."""
         if self.driver is None:
-            options = webdriver.ChromeOptions()
+            options = ChromeOptions()
             options.add_argument("--headless")  # Run in headless mode
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument(f"user-data-dir={DATA_PATH / 'chrome_profile'}")
-            self.driver = webdriver.Chrome(options=options)
+            self.driver = ChromeDriver(options=options)
             stealth(
                 self.driver,
                 languages=["pl-PL", "pl"],
@@ -544,7 +544,7 @@ class Authenticator:
         return self.driver
 
     def _quit_driver(self) -> None:
-        """Quits the Selenium WebDriver if it's running."""
+        """Quits the Selenium ChromeDriver if it's running."""
         if self.driver:
             self.driver.quit()
             self.driver = None
