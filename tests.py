@@ -164,7 +164,7 @@ class TestAuthenticator:
             "userAgent": "Chrome User-Agent"
         }
         mock_chrome = MagicMock(return_value=mock_chrome_instance)
-        monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
+        monkeypatch.setattr("medichaser.ChromeDriver", mock_chrome)
         mock_stealth = MagicMock()
         monkeypatch.setattr("medichaser.stealth", mock_stealth)
 
