@@ -869,9 +869,12 @@ class Notifier:
         messages = []
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
-            clinic = appointment.get("clinic", {}).get("name", "N/A")
-            doctor = appointment.get("doctor", {}).get("name", "N/A")
-            specialty = appointment.get("specialty", {}).get("name", "N/A")
+            clinic_info = appointment.get("clinic", {}) or {}
+            clinic = clinic_info.get("name", "N/A")
+            doctor_info = appointment.get("doctor", {}) or {}
+            doctor = doctor_info.get("name", "N/A")
+            specialty_info = appointment.get("specialty", {}) or {}
+            specialty = specialty_info.get("name", "N/A")
             doctor_languages = appointment.get("doctorLanguages", [])
             languages = (
                 ", ".join([lang.get("name", "N/A") for lang in doctor_languages])
@@ -946,9 +949,12 @@ def display_appointments(appointments: list[dict[str, Any]]) -> None:
         log.info("--------------------------------------------------")
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
-            clinic = appointment.get("clinic", {}).get("name", "N/A")
-            doctor = appointment.get("doctor", {}).get("name", "N/A")
-            specialty = appointment.get("specialty", {}).get("name", "N/A")
+            clinic_info = appointment.get("clinic", {}) or {}
+            clinic = clinic_info.get("name", "N/A")
+            doctor_info = appointment.get("doctor", {}) or {}
+            doctor = doctor_info.get("name", "N/A")
+            specialty_info = appointment.get("specialty", {}) or {}
+            specialty = specialty_info.get("name", "N/A")
             doctor_languages = appointment.get("doctorLanguages", [])
             languages = (
                 ", ".join([lang.get("name", "N/A") for lang in doctor_languages])
