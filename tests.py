@@ -164,7 +164,7 @@ class TestAuthenticator:
             "userAgent": "Chrome User-Agent"
         }
         mock_chrome = MagicMock(return_value=mock_chrome_instance)
-        monkeypatch.setattr("selenium.webdriver.Chrome", mock_chrome)
+        monkeypatch.setattr("medichaser.ChromeDriver", mock_chrome)
         mock_stealth = MagicMock()
         monkeypatch.setattr("medichaser.stealth", mock_stealth)
 
@@ -322,15 +322,17 @@ class TestAuthenticator:
     def test_login_with_refresh_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test the main login orchestrator with a successful token refresh."""
         auth = Authenticator("user", "pass")
-        # First call to load is False, second is True after refresh
-        mock_load_token = Mock(side_effect=[False, True])
+        mock_load_token = Mock(return_value=True)
         mock_refresh = Mock()
+        mock_login_requests = Mock()
         monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
         monkeypatch.setattr(auth, "refresh_token", mock_refresh)
+        monkeypatch.setattr(auth, "login_requests", mock_login_requests)
 
         auth.login()
-        assert mock_load_token.call_count == 2
+        mock_load_token.assert_called_once()
         mock_refresh.assert_called_once()
+        mock_login_requests.assert_not_called()
 
     def test_login_fallback_to_selenium_no_load(
         self, monkeypatch: pytest.MonkeyPatch
@@ -394,6 +396,40 @@ class TestAuthenticator:
         auth.login()
 
         mock_login_selenium.assert_called_once()
+
+    def test_login_no_retry_on_value_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that login does not retry when login_requests raises ValueError."""
+        auth = Authenticator("user", "pass")
+        mock_load_token = Mock(return_value=False)
+        mock_login_requests = Mock(side_effect=ValueError("bad parse"))
+
+        monkeypatch.setattr(auth, "_load_token_from_storage", mock_load_token)
+        monkeypatch.setattr(auth, "login_requests", mock_login_requests)
+        monkeypatch.delenv("SELENIUM_LOGIN", raising=False)
+
+        with pytest.raises(ValueError, match="bad parse"):
+            auth.login()
+
+        mock_login_requests.assert_called_once()
+
+    def test_login_requests_missing_location_header_in_authorize(self) -> None:
+        """Test login_requests fails fast when authorize response misses Location."""
+        auth = Authenticator("user", "pass")
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
+        mock_session.get.return_value = mock_response
+        auth.session = mock_session
+
+        with pytest.raises(
+            ValueError, match="Missing Location header in authorize response."
+        ):
+            auth.login_requests()
+
+        assert mock_session.get.call_count == 1
 
 
 class TestAppointmentFinder:

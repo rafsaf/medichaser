@@ -47,9 +47,9 @@ from filelock import FileLock
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from rich.logging import RichHandler
-from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.webdriver import WebDriver as ChromeDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
@@ -79,6 +79,9 @@ MEDICOVER_API_URL = "https://api-gateway-online24.medicover.pl"
 
 DEFAULT_SLOT_SEARCH_TYPE: int = 0
 
+# Load environment variables
+load_dotenv()
+
 token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
 login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
 
@@ -86,7 +89,7 @@ login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
 console = Console()
 
 logging.basicConfig(
-    level="INFO",
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         RotatingFileHandler(
@@ -97,9 +100,6 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("medichaser")
-
-# Load environment variables
-load_dotenv()
 
 retry_strategy = Retry(
     total=10,
@@ -152,7 +152,7 @@ class Authenticator:
         self.tokenA: str | None = None
         self.tokenR: str | None = None
         self.expires_at: int | None = None
-        self.driver: WebDriver | None = None
+        self.driver: ChromeDriver | None = None
 
     def _get_or_create_device_id(self) -> str:
         """Gets the device ID from storage or creates a new one."""
@@ -261,7 +261,9 @@ class Authenticator:
             allow_redirects=False,
         )
         response.raise_for_status()
-        next_url = response.headers["Location"]
+        next_url = response.headers.get("Location")
+        if not next_url:
+            raise ValueError("Missing Location header in authorize response.")
         time.sleep(2)
 
         response = self.session.get(
@@ -279,7 +281,10 @@ class Authenticator:
         csrf_token = match.group(1)
         parsed_url = urlparse(response.url)
         query_params = parse_qs(parsed_url.query)
-        return_url = query_params["ReturnUrl"][0]
+        return_url_values = query_params.get("ReturnUrl")
+        if not return_url_values:
+            raise MFAError("ReturnUrl not found in login page query string.")
+        return_url = return_url_values[0]
         # Step 2: POST credentials
         login_data = {
             "Input.ReturnUrl": return_url,
@@ -308,7 +313,9 @@ class Authenticator:
 
         # Step 3: Handle redirects and potential MFA
         while response.status_code == 302:
-            redirect_url = response.headers["Location"]
+            redirect_url = response.headers.get("Location")
+            if not redirect_url:
+                raise ValueError("Missing Location header in login redirect response.")
             if not redirect_url.startswith("https://"):
                 redirect_url = MEDICOVER_LOGIN_URL + redirect_url
 
@@ -399,7 +406,10 @@ class Authenticator:
 
         parsed_url = urlparse(mfa_url)
         query_params = parse_qs(parsed_url.query)
-        return_url = query_params["returnUrl"][0]
+        return_url_values = query_params.get("ReturnUrl")
+        if not return_url_values:
+            raise MFAError("ReturnUrl not found in MFA URL query string.")
+        return_url = return_url_values[0]
 
         mfa_data = {
             "Input.MfaCodeId": mfa_code_id,
@@ -456,7 +466,8 @@ class Authenticator:
 
         data = response.json()
         if "error" in data:
-            raise ValueError(f"Failed to get token: {data['error_description']}")
+            error_description = data.get("error_description", data.get("error"))
+            raise ValueError(f"Failed to get token: {error_description}")
 
         expires_in = data.get("expires_in")
         expires_at = int(time.time()) + expires_in if expires_in else None
@@ -475,7 +486,7 @@ class Authenticator:
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(2),
         wait=tenacity.wait_fixed(10),
-        retry=tenacity.retry_if_not_exception_type(MFAError),
+        retry=tenacity.retry_if_not_exception_type((MFAError, ValueError)),
         reraise=True,
     )
     def login(self) -> None:
@@ -500,16 +511,16 @@ class Authenticator:
         else:
             self.login_requests()
 
-    def _init_driver(self) -> WebDriver:
-        """Initializes the Selenium WebDriver if it's not already running."""
+    def _init_driver(self) -> ChromeDriver:
+        """Initializes the Selenium ChromeDriver if it's not already running."""
         if self.driver is None:
-            options = webdriver.ChromeOptions()
+            options = ChromeOptions()
             options.add_argument("--headless")  # Run in headless mode
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument(f"user-data-dir={DATA_PATH / 'chrome_profile'}")
-            self.driver = webdriver.Chrome(options=options)
+            self.driver = ChromeDriver(options=options)
             stealth(
                 self.driver,
                 languages=["pl-PL", "pl"],
@@ -533,7 +544,7 @@ class Authenticator:
         return self.driver
 
     def _quit_driver(self) -> None:
-        """Quits the Selenium WebDriver if it's running."""
+        """Quits the Selenium ChromeDriver if it's running."""
         if self.driver:
             self.driver.quit()
             self.driver = None
@@ -574,7 +585,8 @@ class Authenticator:
 
         data = response.json()
         if "error" in data:
-            if data["error"] == "invalid_grant":
+            error = data.get("error")
+            if error == "invalid_grant":
                 log.error(
                     "Refresh token is invalid or expired. Deleting token file and re-authenticating."
                 )
@@ -584,7 +596,7 @@ class Authenticator:
                     "Invalid grant: refresh token is likely expired or revoked."
                 )
             raise ValueError(
-                f"Failed to refresh token: {response.status_code} {response.text}"
+                f"Failed to refresh token: {response.status_code} {data.get('error_description', response.text)}"
             )
 
         # manually set expires_at
@@ -833,7 +845,8 @@ class AppointmentFinder:
             items = [
                 x
                 for x in items
-                if datetime.datetime.fromisoformat(x["appointmentDate"]).date()
+                if x.get("appointmentDate")
+                and datetime.datetime.fromisoformat(x["appointmentDate"]).date()
                 <= end_date
             ]
 
@@ -1222,8 +1235,8 @@ def main() -> None:
         else:
             filters = finder.find_filters()
 
-        for r in filters[args.filter_type]:
-            log.info(f"{r['id']} - {r['value']}")
+        for r in filters.get(args.filter_type, []):
+            log.info(f"{r.get('id', 'N/A')} - {r.get('value', 'N/A')}")
 
 
 if __name__ == "__main__":
