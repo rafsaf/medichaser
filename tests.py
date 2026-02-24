@@ -602,6 +602,24 @@ class TestNotifier:
         assert "Languages: N/A" in result  # First appointment has no languages
         assert "Languages: Polish" in result  # Second appointment has Polish
 
+    def test_format_appointments_none_nested_objects(self) -> None:
+        """Test formatting when clinic/doctor/specialty are None."""
+        appointments: list[dict[str, Any]] = [
+            {
+                "appointmentDate": "2025-01-03T09:00:00",
+                "clinic": None,
+                "doctor": None,
+                "specialty": None,
+                "doctorLanguages": [],
+            }
+        ]
+
+        result = Notifier.format_appointments(appointments)
+
+        assert "Clinic: N/A" in result
+        assert "Doctor: N/A" in result
+        assert "Specialty: N/A" in result
+
     def test_send_notification_pushbullet(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -778,6 +796,29 @@ class TestUtilityFunctions:
 
         mock_log.info.assert_any_call("New appointments found:")
         mock_log.info.assert_any_call("Date: 2025-01-01T10:00:00")
+
+    def test_display_appointments_none_nested_objects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test display_appointments when clinic/doctor/specialty are None."""
+        mock_log = Mock()
+        monkeypatch.setattr("medichaser.log", mock_log)
+
+        appointments: list[dict[str, Any]] = [
+            {
+                "appointmentDate": "2025-01-03T09:00:00",
+                "clinic": None,
+                "doctor": None,
+                "specialty": None,
+                "doctorLanguages": [],
+            }
+        ]
+
+        display_appointments(appointments)
+
+        mock_log.info.assert_any_call("  Clinic: N/A")
+        mock_log.info.assert_any_call("  Doctor: N/A")
+        mock_log.info.assert_any_call("  Specialty: N/A")
 
 
 class TestNotificationFunctions:
