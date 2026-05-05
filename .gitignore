@@ -117,3 +117,8 @@ visits.db.dir
 
 #local runs
 /appointments.json
+/terraform/lightsail/.terraform.lock.hcl
+/terraform/lightsail/.terraform.tfstate.lock.info
+/terraform/lightsail/terraform.auto.tfvars
+/terraform/lightsail/terraform.tfstate
+/terraform/lightsail/.terraform/
