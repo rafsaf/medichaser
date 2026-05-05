@@ -122,3 +122,4 @@ visits.db.dir
 /terraform/lightsail/terraform.auto.tfvars
 /terraform/lightsail/terraform.tfstate
 /terraform/lightsail/.terraform/
+/terraform/lightsail/terraform.tfstate.backup

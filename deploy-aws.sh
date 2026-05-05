@@ -2,14 +2,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TF_DIR="$SCRIPT_DIR/terraform/lightsail"
 
 PUBLIC_IP="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
 
-cat > "${SCRIPT_DIR}/terraform.auto.tfvars" <<EOF
+cat > "${TF_DIR}/terraform.auto.tfvars" <<EOF
 ssh_cidrs = ["${PUBLIC_IP}/32"]
 EOF
 
-cd "$SCRIPT_DIR"
+cd "$TF_DIR"
 terraform init -upgrade
 terraform apply -auto-approve
 
@@ -28,9 +29,9 @@ for i in $(seq 1 60); do
 done
 
 echo "Uploading .env..."
-scp ../../.env ubuntu@"$SERVER_IP":/home/ubuntu/.env || true
+scp "$SCRIPT_DIR/.env" ubuntu@"$SERVER_IP":/home/ubuntu/.env || true
 
-echo "Setting up server (all-in-one)..."
+echo "Setting up server..."
 
 ssh ubuntu@"$SERVER_IP" <<'EOF'
 set -eux
@@ -38,26 +39,18 @@ set -eux
 export DEBIAN_FRONTEND=noninteractive
 export PATH="$HOME/.local/bin:$PATH"
 
-# --- system ---
 sudo apt-get update
-sudo apt-get install -y git python3.11
+sudo apt-get install -y git python3.11 python3-pip tmux
 
-# --- pip ---
-python3.11 -m ensurepip --upgrade || true
-python3.11 -m pip install --upgrade pip
-
-# --- repo ---
 rm -rf /home/ubuntu/medichaser
 git clone https://github.com/rafsaf/medichaser.git /home/ubuntu/medichaser
 
 cd /home/ubuntu/medichaser
 
-# --- env ---
 if [ -f /home/ubuntu/.env ]; then
   cp /home/ubuntu/.env /home/ubuntu/medichaser/.env
 fi
 
-# --- deps ---
 python3.11 -m pip install --user \
   argcomplete \
   fake-useragent \
@@ -67,6 +60,8 @@ python3.11 -m pip install --user \
   python-dotenv \
   requests \
   rich \
+  selenium \
+  selenium-stealth \
   tenacity \
   xmpppy
 
@@ -74,16 +69,11 @@ EOF
 
 CMD="python3.11 /home/ubuntu/medichaser/medichaser.py find-appointment -i 15 -n pushover -t \"Medicover\" -r 202 -s 3"
 
-echo "$CMD" | pbcopy || true
 
-echo
-echo "========================================"
-echo "🚀 READY — opening SSH..."
-echo "========================================"
-echo
-echo "✅ Command copied to clipboard"
-echo
-echo "$CMD"
-echo
-
-exec ssh -o StrictHostKeyChecking=accept-new ubuntu@"$SERVER_IP"
+ssh -t ubuntu@"$SERVER_IP" '
+tmux new-session -d -s medichaser "
+python3.11 /home/ubuntu/medichaser/medichaser.py find-appointment -i 15 -n pushover -t \"Medicover\" -r 202 -s 3 | tee -a medichaser.log;
+exec bash
+" \;
+tmux attach -t medichaser
+'
