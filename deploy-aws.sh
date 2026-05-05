@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ $# -lt 2 || "$1" != "-s" ]]; then
+  echo "Usage: $0 -s <value1> [value2 ...]"
+  exit 1
+fi
+
+shift # usuń -s
+
+if [[ $# -lt 1 ]]; then
+  echo "Error: at least one value for -s is required"
+  exit 1
+fi
+
+S_ARGS="-s"
+for val in "$@"; do
+  S_ARGS="$S_ARGS $val"
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TF_DIR="$SCRIPT_DIR/terraform/lightsail"
 
@@ -67,13 +84,10 @@ python3.11 -m pip install --user \
 
 EOF
 
-CMD="python3.11 /home/ubuntu/medichaser/medichaser.py find-appointment -i 15 -n pushover -t \"Medicover\" -r 202 -s 3"
-
+CMD="python3.11 /home/ubuntu/medichaser/medichaser.py find-appointment -i 15 -n pushover -t \"Medicover\" -r 202 ${S_ARGS}"
 
 ssh -t ubuntu@"$SERVER_IP" '
-tmux new-session -d -s medichaser "
-python3.11 /home/ubuntu/medichaser/medichaser.py find-appointment -i 15 -n pushover -t \"Medicover\" -r 202 -s 3 | tee -a medichaser.log;
-exec bash
-" \;
+tmux has-session -t medichaser 2>/dev/null || \
+tmux new-session -d -s medichaser "'"$CMD"' | tee -a medichaser.log";
 tmux attach -t medichaser
 '

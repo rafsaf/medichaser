@@ -22,7 +22,7 @@ resource "aws_lightsail_instance" "this" {
   name              = var.name
   availability_zone = "${var.aws_region}${var.availability_zone_suffix}"
   blueprint_id      = "ubuntu_22_04" 
-  bundle_id         = "micro_3_0"   
+  bundle_id         = "nano_3_0"
 
   key_pair_name = aws_lightsail_key_pair.this.name
 
