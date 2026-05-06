@@ -19,6 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import argcomplete
 import argparse
 import base64
 import datetime
@@ -29,21 +30,17 @@ import os
 import pathlib
 import random
 import re
+import requests
 import select
 import string
 import sys
+import tenacity
 import time
 import uuid
-from logging.handlers import RotatingFileHandler
-from typing import Any, cast
-from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
-
-import argcomplete
-import requests
-import tenacity
 from dotenv import load_dotenv
 from fake_useragent import UserAgent
 from filelock import FileLock
+from logging.handlers import RotatingFileHandler
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from rich.logging import RichHandler
@@ -53,6 +50,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
+from typing import Any, cast
+from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
 from urllib3.util import Retry
 
 from notifications import (
@@ -573,33 +572,71 @@ class Authenticator:
             "client_id": "web",
         }
         if "Authorization" in self.headers:
-            del self.headers["Authorization"]  # Remove old token if present
+            del self.headers["Authorization"]
 
-        # Use the refresh token to get a new access token
-        response = self.session.post(
-            f"{MEDICOVER_LOGIN_URL}/connect/token",
-            data=refresh_token_data,
-            headers=self.headers,
-            allow_redirects=False,
+        try:
+            response = self.session.post(
+                f"{MEDICOVER_LOGIN_URL}/connect/token",
+                data=refresh_token_data,
+                headers=self.headers,
+                allow_redirects=False,
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            log.error(f"Network error during token refresh: {e}")
+            raise
+
+        log.debug(
+            "Refresh token response: status=%s content-type=%s",
+            response.status_code,
+            response.headers.get("Content-Type"),
         )
 
-        data = response.json()
+        if response.status_code != 200:
+            log.error(
+                "Refresh token request failed: status=%s body=%s",
+                response.status_code,
+                response.text[:2000],
+            )
+
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            log.error(
+                "Failed to decode refresh token response as JSON. "
+                "status=%s content-type=%s body=%s error=%s",
+                response.status_code,
+                response.headers.get("Content-Type"),
+                response.text[:2000],
+                e,
+            )
+            raise ValueError(
+                f"Invalid JSON response during token refresh "
+                f"(status={response.status_code})"
+            ) from e
+
         if "error" in data:
             error = data.get("error")
+
             if error == "invalid_grant":
                 log.error(
-                    "Refresh token is invalid or expired. Deleting token file and re-authenticating."
+                    "Refresh token is invalid or expired. "
+                    "Deleting token file and re-authenticating."
                 )
+
                 if TOKEN_PATH.exists():
                     TOKEN_PATH.unlink()
+
                 raise InvalidGrantError(
                     "Invalid grant: refresh token is likely expired or revoked."
                 )
+
             raise ValueError(
-                f"Failed to refresh token: {response.status_code} {data.get('error_description', response.text)}"
+                "Failed to refresh token: "
+                f"{response.status_code} "
+                f"{data.get('error_description', response.text)}"
             )
 
-        # manually set expires_at
         expires_in = data.get("expires_in")
         expires_at = int(time.time()) + expires_in if expires_in else None
         data["expires_at"] = expires_at
@@ -610,7 +647,10 @@ class Authenticator:
         self.tokenA = data.get("access_token")
         self.tokenR = data.get("refresh_token")
         self.expires_at = data.get("expires_at")
+
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
+
+        log.info("Access token refreshed successfully.")
 
     def _get_token_from_selenium_storage(self) -> bool:
         """Retrieves token from browser's localStorage."""
@@ -795,15 +835,47 @@ class AppointmentFinder:
         self.session = session
         self.headers = headers
 
+
     def http_get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        response = self.session.get(url, headers=self.headers, params=params)
+        try:
+            response = self.session.get(
+                url,
+                headers=self.headers,
+                params=params,
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            log.error(f"HTTP request failed: {e}")
+            return {}
+
         if response.status_code in [401, 403]:
-            log.error("Unauthorized access error: refreshing token.")
+            log.error(
+                "Unauthorized access error: status=%s body=%s",
+                response.status_code,
+                response.text[:1000],
+            )
             raise ExpiredToken("Access token expired or invalid")
-        elif response.status_code == 200:
+
+        if response.status_code != 200:
+            log.error(
+                "API request failed: status=%s body=%s",
+                response.status_code,
+                response.text[:2000],
+            )
+            return {}
+
+        try:
             return cast(dict[str, Any], response.json())
-        else:
-            log.error(f"Error {response.status_code}: {response.text}")
+        except json.JSONDecodeError as e:
+            log.error(
+                "Invalid JSON from API. "
+                "url=%s status=%s content-type=%s body=%s error=%s",
+                url,
+                response.status_code,
+                response.headers.get("Content-Type"),
+                response.text[:2000],
+                e,
+            )
             return {}
 
     def find_appointments(
@@ -846,17 +918,17 @@ class AppointmentFinder:
                 x
                 for x in items
                 if x.get("appointmentDate")
-                and datetime.datetime.fromisoformat(x["appointmentDate"]).date()
-                <= end_date
+                   and datetime.datetime.fromisoformat(x["appointmentDate"]).date()
+                   <= end_date
             ]
 
         return items
 
     def find_filters(
-        self,
-        region: int | None = None,
-        specialty: list[int] | None = None,
-        slot_search_type: int | str = DEFAULT_SLOT_SEARCH_TYPE,
+            self,
+            region: int | None = None,
+            specialty: list[int] | None = None,
+            slot_search_type: int | str = DEFAULT_SLOT_SEARCH_TYPE,
     ) -> dict[str, Any]:
         filters_url = (
             f"{MEDICOVER_API_URL}/appointments/api/search-appointments/filters"
@@ -895,12 +967,12 @@ class Notifier:
                 else "N/A"
             )
             message = (
-                f"Date: {date}\n"
-                f"Clinic: {clinic}\n"
-                f"Doctor: {doctor}\n"
-                f"Languages: {languages}\n"
-                + f"Specialty: {specialty}\n"
-                + "--------------------------------------------------"
+                    f"Date: {date}\n"
+                    f"Clinic: {clinic}\n"
+                    f"Doctor: {doctor}\n"
+                    f"Languages: {languages}\n"
+                    + f"Specialty: {specialty}\n"
+                    + "--------------------------------------------------"
             )
             messages.append(message)
         return "\n".join(messages)
@@ -912,10 +984,10 @@ class Notifier:
         reraise=True,
     )
     def send_notification(
-        notifier: str | None,
-        title: str | None,
-        appointments: list[dict[str, Any]] | None = None,
-        message: str | None = None,
+            notifier: str | None,
+            title: str | None,
+            appointments: list[dict[str, Any]] | None = None,
+            message: str | None = None,
     ) -> None:
         """Send a notification with formatted appointments or custom message.
 
