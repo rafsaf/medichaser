@@ -818,7 +818,13 @@ class AppointmentFinder:
         slot_search_type: int | str = DEFAULT_SLOT_SEARCH_TYPE,
     ) -> list[dict[str, Any]]:
         appointment_url = (
-            f"{MEDICOVER_API_URL}/appointments/api/search-appointments/slots"
+            f"{MEDICOVER_API_URL}/appointments/api/v2/search-appointments/slots"
+        )
+        # The v2 API expects a textual SlotSearchType ("Standard", "LastMinute",
+        # "DiagnosticProcedure", ...); legacy v1 numeric values map to a regular
+        # "Standard" search — the visit kind is determined by SpecialtyIds.
+        slot_search_type_v2 = (
+            slot_search_type if isinstance(slot_search_type, str) else "Standard"
         )
         params: dict[str, Any] = {
             "RegionIds": region,
@@ -827,8 +833,8 @@ class AppointmentFinder:
             "Page": 1,
             "PageSize": 5000,
             "StartTime": start_date.isoformat(),
-            "SlotSearchType": slot_search_type,
-            "VisitType": "Center",
+            "SlotSearchType": slot_search_type_v2,
+            "isOverbookingSearchDisabled": "false",
         }
 
         if language:
