@@ -810,7 +810,7 @@ class AppointmentFinder:
         self,
         region: int,
         specialty: list[int],
-        clinic: int | None,
+        clinic: list[int] | None,
         start_date: datetime.date,
         end_date: datetime.date | None,
         language: int | None,
@@ -1041,7 +1041,13 @@ def main() -> None:
         help="Specialty ID",
     )
     find_appointment.add_argument(
-        "-c", "--clinic", required=False, type=int, help="Clinic ID"
+        "-c",
+        "--clinic",
+        required=False,
+        type=int,
+        action="extend",
+        nargs="+",
+        help="Clinic ID(s)",
     )
     find_appointment.add_argument(
         "-d", "--doctor", required=False, type=int, help="Doctor ID"
@@ -1093,7 +1099,16 @@ def main() -> None:
     )
 
     list_filters_subparsers.add_parser("regions", help="List available regions")
-    list_filters_subparsers.add_parser("specialties", help="List available specialties")
+    specialties = list_filters_subparsers.add_parser(
+        "specialties", help="List available specialties"
+    )
+    specialties.add_argument(
+        "-S",
+        "--slot-search-type",
+        default=DEFAULT_SLOT_SEARCH_TYPE,
+        type=parse_slot_search_type,
+        help='Slot search type (e.g. "0", "DiagnosticProcedure"). Default: 0',
+    )
     doctors = list_filters_subparsers.add_parser(
         "doctors", help="List available doctors"
     )
@@ -1107,6 +1122,13 @@ def main() -> None:
     clinics.add_argument("-r", "--region", required=True, type=int, help="Region ID")
     clinics.add_argument(
         "-s", "--specialty", required=True, type=int, nargs="+", help="Specialty ID(s)"
+    )
+    clinics.add_argument(
+        "-S",
+        "--slot-search-type",
+        default=DEFAULT_SLOT_SEARCH_TYPE,
+        type=parse_slot_search_type,
+        help='Slot search type (e.g. "0", "DiagnosticProcedure"). Default: 0',
     )
 
     argcomplete.autocomplete(parser)
@@ -1230,13 +1252,18 @@ def main() -> None:
                 message=f"medichaser crashed while refreshing token\n: {e}",
             )
             raise
+        slot_search_type = getattr(args, "slot_search_type", DEFAULT_SLOT_SEARCH_TYPE)
         if args.filter_type in ("doctors", "clinics"):
-            filters = finder.find_filters(args.region, args.specialty)
+            filters = finder.find_filters(
+                args.region, args.specialty, slot_search_type=slot_search_type
+            )
         else:
-            filters = finder.find_filters()
+            filters = finder.find_filters(slot_search_type=slot_search_type)
 
+        # print() instead of log.info(): RichHandler wraps long lines, which
+        # breaks scripts that parse this output (e.g. `... | grep '^[0-9]* - '`)
         for r in filters.get(args.filter_type, []):
-            log.info(f"{r.get('id', 'N/A')} - {r.get('value', 'N/A')}")
+            print(f"{r.get('id', 'N/A')} - {r.get('value', 'N/A')}")
 
 
 if __name__ == "__main__":
