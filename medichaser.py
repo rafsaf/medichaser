@@ -29,7 +29,6 @@ import os
 import pathlib
 import random
 import re
-import select
 import string
 import sys
 import time
@@ -393,12 +392,11 @@ class Authenticator:
 
         # Prompt user for MFA code
         log.info("Please enter the MFA code sent to your device and press Enter:")
-        rlist, _, _ = select.select([sys.stdin], [], [], 120)
-        if rlist:
-            mfa_code = sys.stdin.readline().rstrip("\n")
-        else:
-            log.error("Error getting MFA code input: Timeout expired.")
-            raise MFAError("Timeout! Failed to get MFA code input.")
+        try:
+            mfa_code = input().strip()
+        except EOFError:
+            log.error("Error getting MFA code input: no interactive stdin.")
+            raise MFAError("Failed to get MFA code input.")
 
         if len(mfa_code) != 6 or not mfa_code.isdigit():
             log.error("MFA code must be 6 digits.")
@@ -751,13 +749,12 @@ class Authenticator:
             log.warning("Could not remove consent manager overlay on MFA page.")
 
         log.info("Please enter the MFA code sent to your device and press Enter:")
-        rlist, _, _ = select.select([sys.stdin], [], [], 60)
-        if rlist:
-            mfa_code = sys.stdin.readline().rstrip("\n")
-        else:
-            log.error("Error getting MFA code input: Timeout expired.")
+        try:
+            mfa_code = input().strip()
+        except EOFError:
+            log.error("Error getting MFA code input: no interactive stdin.")
             self._quit_driver()
-            raise MFAError("Timeout! Failed to get MFA code input.")
+            raise MFAError("Failed to get MFA code input.")
 
         if len(mfa_code) != 6 or not mfa_code.isdigit():
             log.error("MFA code must be 6 digits.")
