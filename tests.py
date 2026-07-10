@@ -488,7 +488,7 @@ class TestAppointmentFinder:
         result = finder.find_appointments(
             region=1,
             specialty=[2],
-            clinic=3,
+            clinic=[3],
             start_date=start_date,
             end_date=None,
             language=None,
@@ -515,7 +515,7 @@ class TestAppointmentFinder:
         result = finder.find_appointments(
             region=1,
             specialty=[2],
-            clinic=3,
+            clinic=[3],
             start_date=start_date,
             end_date=None,
             language=4,
@@ -553,7 +553,7 @@ class TestAppointmentFinder:
         result = finder.find_appointments(
             region=1,
             specialty=[2],
-            clinic=3,
+            clinic=[3],
             start_date=start_date,
             end_date=end_date,
             language=None,
@@ -1278,7 +1278,9 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
-def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_list_filters_regions(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Test the main function for list-filters regions."""
     mock_args = Namespace(
         command="list-filters",
@@ -1315,11 +1317,16 @@ def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mock_auth_instance.login.assert_called_once()
     mock_auth_instance.refresh_token.assert_called_once()
-    mock_finder_instance.find_filters.assert_called_once_with()
-    mock_log.info.assert_called_with("1 - Region 1")
+    mock_finder_instance.find_filters.assert_called_once_with(
+        slot_search_type=DEFAULT_SLOT_SEARCH_TYPE
+    )
+    # results go through print() so scripts can parse the output
+    assert "1 - Region 1" in capsys.readouterr().out
 
 
-def test_main_list_filters_doctors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_list_filters_doctors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Test the main function for list-filters doctors."""
     mock_args = Namespace(
         command="list-filters",
@@ -1356,8 +1363,10 @@ def test_main_list_filters_doctors(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mock_auth_instance.login.assert_called_once()
     mock_auth_instance.refresh_token.assert_called_once()
-    mock_finder_instance.find_filters.assert_called_once_with(1, 2)
-    mock_log.info.assert_called_with("1 - Doctor 1")
+    mock_finder_instance.find_filters.assert_called_once_with(
+        1, 2, slot_search_type=DEFAULT_SLOT_SEARCH_TYPE
+    )
+    assert "1 - Doctor 1" in capsys.readouterr().out
 
 
 def test_main_missing_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1451,7 +1460,9 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
 
-def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_list_filters_clinics(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Test the main function for list-filters clinics."""
     mock_args = Namespace(
         command="list-filters",
@@ -1488,5 +1499,7 @@ def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mock_auth_instance.login.assert_called_once()
     mock_auth_instance.refresh_token.assert_called_once()
-    mock_finder_instance.find_filters.assert_called_once_with(1, [2, 3])
-    mock_log.info.assert_called_with("1 - Clinic 1")
+    mock_finder_instance.find_filters.assert_called_once_with(
+        1, [2, 3], slot_search_type=DEFAULT_SLOT_SEARCH_TYPE
+    )
+    assert "1 - Clinic 1" in capsys.readouterr().out
