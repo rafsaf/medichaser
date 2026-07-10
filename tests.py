@@ -34,7 +34,7 @@ from medichaser import (
     NextRun,
     Notifier,
     display_appointments,
-    json_date_serializer,
+    format_start_message,
     main,
 )
 from notifications import (
@@ -785,22 +785,27 @@ class TestNextRun:
 class TestUtilityFunctions:
     """Test cases for utility functions."""
 
-    def test_json_date_serializer_date(self) -> None:
-        """Test JSON serializer with date object."""
-        test_date = datetime.date(2025, 1, 1)
-        result = json_date_serializer(test_date)
-        assert result == "2025-01-01"
+    def test_format_start_message_with_title(self) -> None:
+        """Test start message when a title is given."""
+        args = Namespace(title="Dentist checkup", interval=15)
+        result = format_start_message(args)
+        assert result == "Searching: Dentist checkup, every 15 min"
 
-    def test_json_date_serializer_datetime(self) -> None:
-        """Test JSON serializer with datetime object."""
-        test_datetime = datetime.datetime(2025, 1, 1, 12, 30, 45)
-        result = json_date_serializer(test_datetime)
-        assert result == "2025-01-01T12:30:45"
-
-    def test_json_date_serializer_invalid_type(self) -> None:
-        """Test JSON serializer with invalid type."""
-        with pytest.raises(TypeError, match="not JSON serializable"):
-            json_date_serializer("not a date")
+    def test_format_start_message_without_title(self) -> None:
+        """Test start message built from run parameters when no title is given."""
+        args = Namespace(
+            command="find-appointment",
+            notification="telegram",
+            title=None,
+            region=199,
+            specialty=[22890],
+            interval=15,
+            clinic=None,
+        )
+        result = format_start_message(args)
+        assert (
+            result == "medichaser started: region=199, specialty=[22890], interval=15"
+        )
 
     def test_display_appointments_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test display_appointments with empty list."""

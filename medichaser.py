@@ -982,6 +982,18 @@ def display_appointments(appointments: list[dict[str, Any]]) -> None:
             log.info("--------------------------------------------------")
 
 
+def format_start_message(args: argparse.Namespace) -> str:
+    """Concise human-readable summary of an interval run."""
+    if args.title:
+        return f"Searching: {args.title}, every {args.interval} min"
+    run_params = {
+        k: v
+        for k, v in vars(args).items()
+        if v is not None and k not in ("command", "notification", "title")
+    }
+    return "medichaser started: " + ", ".join(f"{k}={v}" for k, v in run_params.items())
+
+
 def parse_slot_search_type(value: str) -> int | str:
     try:
         return int(value)
@@ -1128,21 +1140,10 @@ def main() -> None:
 
     if args.command == "find-appointment":
         if args.interval is not None:
-            if args.title:
-                start_msg = f"Searching: {args.title}, every {args.interval} min"
-            else:
-                run_params = {
-                    k: v
-                    for k, v in vars(args).items()
-                    if v is not None and k not in ("command", "notification", "title")
-                }
-                start_msg = "medichaser started: " + ", ".join(
-                    f"{k}={v}" for k, v in run_params.items()
-                )
             Notifier.send_notification(
                 args.notification,
                 "Medichaser start",
-                message=start_msg,
+                message=format_start_message(args),
             )
 
         next_run = NextRun(args.interval)
