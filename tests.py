@@ -500,7 +500,8 @@ class TestAppointmentFinder:
         call_args = mock_http_get.call_args
         assert call_args is not None
         params: dict[str, Any] = call_args.args[1]
-        assert params["SlotSearchType"] == DEFAULT_SLOT_SEARCH_TYPE
+        # v2 API: the legacy numeric default maps to a textual "Standard"
+        assert params["SlotSearchType"] == "Standard"
 
     def test_find_appointments_with_filters(
         self, monkeypatch: pytest.MonkeyPatch
@@ -527,9 +528,64 @@ class TestAppointmentFinder:
         call_args = mock_http_get.call_args
         assert call_args is not None
         params: dict[str, Any] = call_args.args[1]
-        assert params["SlotSearchType"] == DEFAULT_SLOT_SEARCH_TYPE
+        assert params["SlotSearchType"] == "Standard"
         assert "DoctorLanguageIds" in params
         assert "DoctorIds" in params
+
+    def test_find_appointments_slot_search_type_mapping(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legacy numeric slot search types map to "Standard", textual pass through."""
+        mock_session = Mock()
+        finder = AppointmentFinder(mock_session, {})
+        mock_http_get = Mock(return_value={"items": []})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
+
+        common: dict[str, Any] = {
+            "region": 1,
+            "specialty": [2],
+            "clinic": None,
+            "start_date": datetime.date(2025, 1, 1),
+            "end_date": None,
+            "language": None,
+            "doctor": None,
+        }
+
+        for legacy_numeric in (0, 2):
+            finder.find_appointments(**common, slot_search_type=legacy_numeric)
+            params: dict[str, Any] = mock_http_get.call_args.args[1]
+            assert params["SlotSearchType"] == "Standard"
+
+        for textual in ("Standard", "LastMinute", "DiagnosticProcedure"):
+            finder.find_appointments(**common, slot_search_type=textual)
+            params = mock_http_get.call_args.args[1]
+            assert params["SlotSearchType"] == textual
+
+    def test_find_appointments_uses_v2_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slots are fetched from the v2 endpoint with the parameters it expects."""
+        mock_session = Mock()
+        finder = AppointmentFinder(mock_session, {})
+        mock_http_get = Mock(return_value={"items": []})
+        monkeypatch.setattr(finder, "http_get", mock_http_get)
+
+        finder.find_appointments(
+            region=1,
+            specialty=[2],
+            clinic=None,
+            start_date=datetime.date(2025, 1, 1),
+            end_date=None,
+            language=None,
+            doctor=None,
+        )
+
+        url: str = mock_http_get.call_args.args[0]
+        assert url.endswith("/appointments/api/v2/search-appointments/slots")
+        params: dict[str, Any] = mock_http_get.call_args.args[1]
+        assert params["isOverbookingSearchDisabled"] == "false"
+        # v1-only parameter, not used by the v2 endpoint
+        assert "VisitType" not in params
 
     def test_find_appointments_with_end_date_filter(
         self, monkeypatch: pytest.MonkeyPatch
