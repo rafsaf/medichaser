@@ -982,11 +982,16 @@ def display_appointments(appointments: list[dict[str, Any]]) -> None:
             log.info("--------------------------------------------------")
 
 
-def json_date_serializer(obj: Any) -> str:
-    """JSON serializer for objects not serializable by default json code"""
-    if isinstance(obj, datetime.date | datetime.datetime):
-        return obj.isoformat()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+def format_start_message(args: argparse.Namespace) -> str:
+    """Concise human-readable summary of an interval run."""
+    if args.title:
+        return f"Searching: {args.title}, every {args.interval} min"
+    run_params = {
+        k: v
+        for k, v in vars(args).items()
+        if v is not None and k not in ("command", "notification", "title")
+    }
+    return "medichaser started: " + ", ".join(f"{k}={v}" for k, v in run_params.items())
 
 
 def parse_slot_search_type(value: str) -> int | str:
@@ -1138,7 +1143,7 @@ def main() -> None:
             Notifier.send_notification(
                 args.notification,
                 "Medichaser start",
-                message=f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
+                message=format_start_message(args),
             )
 
         next_run = NextRun(args.interval)
