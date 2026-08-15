@@ -927,6 +927,7 @@ class TestNotificationFunctions:
         mock_apprise = Mock()
         mock_print = Mock()
 
+        monkeypatch.setattr("notifications.environ", {})
         monkeypatch.setattr("notifications.apprise", mock_apprise)
         monkeypatch.setattr("builtins.print", mock_print)
 
@@ -936,7 +937,7 @@ class TestNotificationFunctions:
         mock_apprise.notify.assert_not_called()
         mock_print.assert_called_once()
         assert (
-            "notifications require NOTIFIER_APPRISE_URL to be exported."
+            "notifications require NOTIFIER_APPRISE_URLS to be exported."
             in mock_print.call_args[0][0]
         )
 

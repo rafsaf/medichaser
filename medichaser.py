@@ -1065,7 +1065,7 @@ def main() -> None:
         "-n",
         "--notification",
         required=False,
-        nargs='?',
+        nargs="?",
         default=None,
         const=None,
         choices=[None, "pushbullet", "pushover", "telegram", "xmpp", "gotify", "prowl"],
