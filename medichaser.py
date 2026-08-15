@@ -56,12 +56,13 @@ from selenium_stealth import stealth
 from urllib3.util import Retry
 
 from notifications import (
-    gotify_notify,
-    prowl_notify,
-    pushbullet_notify,
-    pushover_notify,
-    telegram_notify,
-    xmpp_notify,
+    legacy_gotify_notify,
+    legacy_prowl_notify,
+    legacy_pushbullet_notify,
+    legacy_pushover_notify,
+    legacy_telegram_notify,
+    legacy_xmpp_notify,
+    notify,
 )
 
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
@@ -932,23 +933,24 @@ class Notifier:
                 return
             message = Notifier.format_appointments(appointments)
 
-        if notifier is None:
-            log.info("No notifier specified, skipping notification.")
-            return
-
         log.info("Sending notification to %s with title: %s", notifier, title)
-        if notifier == "pushbullet":
-            pushbullet_notify(message, title)
+        if notifier is None:
+            notify(message, title)
+        elif notifier == "pushbullet":
+            legacy_pushbullet_notify(message, title)
         elif notifier == "pushover":
-            pushover_notify(message, title)
+            legacy_pushover_notify(message, title)
         elif notifier == "telegram":
-            telegram_notify(message, title)
+            legacy_telegram_notify(message, title)
         elif notifier == "xmpp":
-            xmpp_notify(message)
+            legacy_xmpp_notify(message, title)
         elif notifier == "gotify":
-            gotify_notify(message, title)
+            legacy_gotify_notify(message, title)
         elif notifier == "prowl":
-            prowl_notify(message, title)
+            legacy_prowl_notify(message, title)
+        else:
+            log.error("Unknown notification service.")
+            return
         log.info("Notification sent successfully.")
 
 
@@ -1060,7 +1062,14 @@ def main() -> None:
         help="End date in YYYY-MM-DD format",
     )
     find_appointment.add_argument(
-        "-n", "--notification", required=False, help="Notification method"
+        "-n",
+        "--notification",
+        required=False,
+        nargs='?',
+        default=None,
+        const=None,
+        choices=[None, "pushbullet", "pushover", "telegram", "xmpp", "gotify", "prowl"],
+        help="Notification method",
     )
     find_appointment.add_argument(
         "-t", "--title", required=False, help="Notification title"
