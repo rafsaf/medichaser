@@ -56,12 +56,14 @@ from selenium_stealth import stealth
 from urllib3.util import Retry
 
 from notifications import (
-    gotify_notify,
-    prowl_notify,
-    pushbullet_notify,
-    pushover_notify,
-    telegram_notify,
-    xmpp_notify,
+    legacy_gotify_setup,
+    legacy_prowl_setup,
+    legacy_pushbullet_setup,
+    legacy_pushover_setup,
+    legacy_telegram_setup,
+    legacy_xmpp_setup,
+    notification_setup,
+    notify,
 )
 
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
@@ -123,6 +125,12 @@ class ExpiredToken(Exception):
 
 class MFAError(Exception):
     """Custom exception for MFA-related errors."""
+
+    pass
+
+
+class NotificationError(Exception):
+    """Custom exception for notification errors."""
 
     pass
 
@@ -874,6 +882,26 @@ class AppointmentFinder:
 
 class Notifier:
     @staticmethod
+    def setup_notification_service(service: str | None):
+        # setup notification service
+        if service is None:
+            notification_setup()
+        elif service == "pushbullet":
+            legacy_pushbullet_setup()
+        elif service == "pushover":
+            legacy_pushover_setup()
+        elif service == "telegram":
+            legacy_telegram_setup()
+        elif service == "xmpp":
+            legacy_xmpp_setup()
+        elif service == "gotify":
+            legacy_gotify_setup()
+        elif service == "prowl":
+            legacy_prowl_setup()
+        else:
+            raise NotificationError("Unknown notification service.")
+
+    @staticmethod
     def format_appointments(appointments: list[dict[str, Any]]) -> str:
         """Format appointments into a human-readable string."""
         if not appointments:
@@ -912,7 +940,6 @@ class Notifier:
         reraise=True,
     )
     def send_notification(
-        notifier: str | None,
         title: str | None,
         appointments: list[dict[str, Any]] | None = None,
         message: str | None = None,
@@ -932,23 +959,11 @@ class Notifier:
                 return
             message = Notifier.format_appointments(appointments)
 
-        if notifier is None:
-            log.info("No notifier specified, skipping notification.")
-            return
+        log.info("Sending notification with title: %s", title)
+        status = notify(message, title)
+        if not status:
+            raise NotificationError("Unable to send notification!")
 
-        log.info("Sending notification to %s with title: %s", notifier, title)
-        if notifier == "pushbullet":
-            pushbullet_notify(message, title)
-        elif notifier == "pushover":
-            pushover_notify(message, title)
-        elif notifier == "telegram":
-            telegram_notify(message, title)
-        elif notifier == "xmpp":
-            xmpp_notify(message)
-        elif notifier == "gotify":
-            gotify_notify(message, title)
-        elif notifier == "prowl":
-            prowl_notify(message, title)
         log.info("Notification sent successfully.")
 
 
@@ -1060,7 +1075,14 @@ def main() -> None:
         help="End date in YYYY-MM-DD format",
     )
     find_appointment.add_argument(
-        "-n", "--notification", required=False, help="Notification method"
+        "-n",
+        "--notification",
+        required=False,
+        nargs="?",
+        default=None,
+        const=None,
+        choices=[None, "pushbullet", "pushover", "telegram", "xmpp", "gotify", "prowl"],
+        help="Notification method",
     )
     find_appointment.add_argument(
         "-t", "--title", required=False, help="Notification title"
@@ -1134,9 +1156,10 @@ def main() -> None:
     finder = AppointmentFinder(auth.session, auth.headers)
 
     if args.command == "find-appointment":
+        Notifier.setup_notification_service(args.notification)
+
         if args.interval is not None:
             Notifier.send_notification(
-                args.notification,
                 "Medichaser start",
                 message=f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
             )
@@ -1195,7 +1218,7 @@ def main() -> None:
                 # Send notification if appointments are found
                 if new_appointments:
                     Notifier.send_notification(
-                        args.notification, args.title, appointments=new_appointments
+                        args.title, appointments=new_appointments
                     )
 
                 if next_run.interval_minutes is None:
@@ -1206,7 +1229,6 @@ def main() -> None:
         except Exception as e:
             log.error(f"Error in main loop: {e}")
             Notifier.send_notification(
-                args.notification,
                 "Medichaser error",
                 message=f"medichaser crashed during run:\n {e}",
             )
@@ -1225,7 +1247,6 @@ def main() -> None:
         except Exception as e:
             log.error(f"Error refreshing token: {e}")
             Notifier.send_notification(
-                args.notification,
                 "Medichaser error",
                 message=f"medichaser crashed while refreshing token\n: {e}",
             )

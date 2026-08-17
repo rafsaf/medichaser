@@ -22,8 +22,6 @@ from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
-import requests
-from notifiers.exceptions import BadArguments
 
 from medichaser import (
     DEFAULT_SLOT_SEARCH_TYPE,
@@ -32,17 +30,20 @@ from medichaser import (
     InvalidGrantError,
     MFAError,
     NextRun,
+    NotificationError,
     Notifier,
     display_appointments,
     json_date_serializer,
     main,
 )
 from notifications import (
-    gotify_notify,
-    pushbullet_notify,
-    pushover_notify,
-    telegram_notify,
-    xmpp_notify,
+    legacy_gotify_setup,
+    legacy_prowl_setup,
+    legacy_pushbullet_setup,
+    legacy_pushover_setup,
+    legacy_telegram_setup,
+    legacy_xmpp_setup,
+    notification_setup,
 )
 
 
@@ -656,62 +657,41 @@ class TestNotifier:
         assert "Doctor: N/A" in result
         assert "Specialty: N/A" in result
 
-    def test_send_notification_pushbullet(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test sending notification via pushbullet."""
-        mock_pushbullet = Mock()
-        monkeypatch.setattr("medichaser.pushbullet_notify", mock_pushbullet)
+    def test_send_notification(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test sending notification."""
+        mock_notify = Mock()
+
+        monkeypatch.setattr("medichaser.notify", mock_notify)
 
         appointments: list[dict[str, Any]] = [
             {"appointmentDate": "2025-01-01T10:00:00"}
         ]
-        Notifier.send_notification(
-            "pushbullet", "Test Title", appointments=appointments
-        )
+        Notifier.send_notification("Test Title", appointments=appointments)
 
-        mock_pushbullet.assert_called_once()
-        args, kwargs = mock_pushbullet.call_args
-        assert "Test Title" in kwargs or "Test Title" in args
-
-    def test_send_notification_telegram(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test sending notification via telegram."""
-        mock_telegram = Mock()
-        monkeypatch.setattr("medichaser.telegram_notify", mock_telegram)
-
-        appointments: list[dict[str, Any]] = [
-            {"appointmentDate": "2025-01-01T10:00:00"}
-        ]
-        Notifier.send_notification("telegram", "Test Title", appointments=appointments)
-
-        mock_telegram.assert_called_once()
+        mock_notify.assert_called_once()
 
     def test_send_notification_with_message(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test sending notification with custom message."""
-        mock_pushbullet = Mock()
-        monkeypatch.setattr("medichaser.pushbullet_notify", mock_pushbullet)
 
-        Notifier.send_notification("pushbullet", "Test Title", message="Custom message")
+        mock_notify = Mock()
+        monkeypatch.setattr("medichaser.notify", mock_notify)
 
-        mock_pushbullet.assert_called_once_with("Custom message", "Test Title")
+        Notifier.send_notification("Test Title", message="Custom message")
 
-    def test_send_notification_no_notifier(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test sending notification with no notifier specified."""
-        mock_log = Mock()
-        monkeypatch.setattr("medichaser.log", mock_log)
+        mock_notify.assert_called_once_with("Custom message", "Test Title")
 
-        appointments: list[dict[str, Any]] = [
-            {"appointmentDate": "2025-01-01T10:00:00"}
-        ]
-        Notifier.send_notification(None, "Test Title", appointments=appointments)
+    def test_unable_to_send_notification(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test sending notification with custom message."""
+        mock_notify = Mock()
+        mock_notify.notify.return_value = False
 
-        mock_log.info.assert_called_once_with(
-            "No notifier specified, skipping notification."
-        )
+        monkeypatch.setattr("medichaser.notify", mock_notify)
+
+        Notifier.send_notification("Test Title", message="Custom message")
+
+        mock_notify.assert_called_once_with("Custom message", "Test Title")
 
     def test_send_notification_no_message_or_appointments(
         self, monkeypatch: pytest.MonkeyPatch
@@ -720,11 +700,45 @@ class TestNotifier:
         mock_log = Mock()
         monkeypatch.setattr("medichaser.log", mock_log)
 
-        Notifier.send_notification("pushbullet", "Test Title")
+        Notifier.send_notification("Test Title")
 
         mock_log.warning.assert_called_once_with(
             "No message or appointments provided for notification."
         )
+
+    def test_setup_notification_service_invalid_notifier(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with invalid notifier."""
+        mock_log = Mock()
+        monkeypatch.setattr("medichaser.log", mock_log)
+
+        with pytest.raises(NotificationError):
+            Notifier.setup_notification_service("invalidservice")
+
+    def test_setup_notification_service_general(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with invalid notifier."""
+        mock_notification_setup = Mock()
+        monkeypatch.setattr("medichaser.notification_setup", mock_notification_setup)
+
+        Notifier.setup_notification_service(None)
+
+        mock_notification_setup.assert_called_once()
+
+    def test_setup_notification_service_pushbullet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test sending notification with invalid notifier."""
+        mock_legacy_pushbullet_setup = Mock()
+        monkeypatch.setattr(
+            "medichaser.legacy_pushbullet_setup", mock_legacy_pushbullet_setup
+        )
+
+        Notifier.setup_notification_service("pushbullet")
+
+        mock_legacy_pushbullet_setup.assert_called_once()
 
 
 class TestNextRun:
@@ -860,344 +874,335 @@ class TestUtilityFunctions:
 class TestNotificationFunctions:
     """Test cases for notification functions."""
 
-    def test_pushbullet_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test successful pushbullet notification."""
-        mock_pushbullet = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_pushbullet.notify.return_value = mock_result
+    def test_notification_setup_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test successful notification."""
+        mock_apprise = Mock()
 
-        monkeypatch.setattr("notifications.pushbullet", mock_pushbullet)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
 
-        pushbullet_notify("Test message", "Test title")
+        notification_setup("gotify://hostname/token")
 
-        mock_pushbullet.notify.assert_called_once_with(
-            message="Test message", title="Test title"
-        )
+        mock_apprise.add.assert_called_once
 
-    def test_pushbullet_notify_no_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test pushbullet notification without title."""
-        mock_pushbullet = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_pushbullet.notify.return_value = mock_result
-
-        monkeypatch.setattr("notifications.pushbullet", mock_pushbullet)
-
-        pushbullet_notify("Test message")
-
-        mock_pushbullet.notify.assert_called_once_with(message="Test message")
-
-    def test_pushbullet_notify_bad_arguments(
+    def test_notification_setup_environ_success(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test pushbullet notification with bad arguments."""
-        mock_pushbullet = Mock()
-        mock_pushbullet.notify.side_effect = BadArguments("Invalid token")
-        mock_print = Mock()
+        """Test successful notification after getting url from environ."""
+        mock_apprise = Mock()
 
-        monkeypatch.setattr("notifications.pushbullet", mock_pushbullet)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        pushbullet_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Pushbullet failed" in mock_print.call_args[0][0]
-
-    def test_pushbullet_notify_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test pushbullet notification failure."""
-        mock_pushbullet = Mock()
-        mock_result = Mock()
-        mock_result.status = "Failed"
-        mock_result.errors = ["Error message"]
-        mock_pushbullet.notify.return_value = mock_result
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.pushbullet", mock_pushbullet)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        pushbullet_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Pushbullet notification failed" in mock_print.call_args[0][0]
-
-    def test_pushover_notify_no_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test pushover notification without title."""
-        mock_pushover = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_pushover.notify.return_value = mock_result
-
-        monkeypatch.setattr("notifications.pushover", mock_pushover)
-
-        pushover_notify("Test message")
-
-        mock_pushover.notify.assert_called_once_with(message="Test message")
-
-    def test_pushover_notify_bad_arguments(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test pushover notification with bad arguments."""
-        mock_pushover = Mock()
-        mock_pushover.notify.side_effect = BadArguments("Invalid token")
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.pushover", mock_pushover)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        pushover_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Pushover failed" in mock_print.call_args[0][0]
-
-    def test_pushover_notify_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test pushover notification failure."""
-        mock_pushover = Mock()
-        mock_result = Mock()
-        mock_result.status = "Failed"
-        mock_result.errors = ["Error message"]
-        mock_pushover.notify.return_value = mock_result
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.pushover", mock_pushover)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        pushover_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Pushover notification failed" in mock_print.call_args[0][0]
-
-    def test_telegram_notify_bad_arguments(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test telegram notification with bad arguments."""
-        mock_telegram = Mock()
-        mock_telegram.notify.side_effect = BadArguments("Invalid chat id")
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.telegram", mock_telegram)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        telegram_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Telegram notifications require" in mock_print.call_args[0][0]
-
-    def test_telegram_notify_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test telegram notification failure."""
-        mock_telegram = Mock()
-        mock_result = Mock()
-        mock_result.status = "Failed"
-        mock_result.errors = ["Error message"]
-        mock_telegram.notify.return_value = mock_result
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.telegram", mock_telegram)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        telegram_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "Telegram notification failed" in mock_print.call_args[0][0]
-
-    def test_xmpp_notify_send_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test XMPP notification with send failure."""
         mock_environ: dict[str, str] = {
-            "NOTIFIERS_XMPP_JID": "user@example.com",
-            "NOTIFIERS_XMPP_PASSWORD": "password",
-            "NOTIFIERS_XMPP_RECEIVER": "receiver@example.com",
+            "NOTIFIER_APPRISE_URLS": "gotify://hostname/token",
         }
-        mock_xmpp = Mock()
-        mock_jid = Mock()
-        mock_jid.getDomain.return_value = "example.com"
-        mock_jid.getNode.return_value = "user"
-        mock_jid.getResource.return_value = "resource"
-        mock_xmpp.protocol.JID.return_value = mock_jid
-
-        mock_client = Mock()
-        mock_client.connect.return_value = True
-        mock_client.auth.return_value = True
-        mock_client.send.return_value = False  # Simulate send failure
-        mock_xmpp.Client.return_value = mock_client
-        mock_print = Mock()
 
         monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("notifications.xmpp", mock_xmpp)
-        monkeypatch.setattr("builtins.print", mock_print)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
 
-        xmpp_notify("Test message")
+        notification_setup(None)
 
-        mock_client.connect.assert_called_once()
-        mock_client.auth.assert_called_once()
-        mock_client.send.assert_called_once()
-        mock_print.assert_called_once_with("XMPP notification failed")
+        mock_apprise.add.assert_called_once
 
-    def test_pushover_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test successful pushover notification."""
-        mock_pushover = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_pushover.notify.return_value = mock_result
-
-        monkeypatch.setattr("notifications.pushover", mock_pushover)
-
-        pushover_notify("Test message", "Test title")
-
-        mock_pushover.notify.assert_called_once_with(
-            message="Test message", title="Test title"
-        )
-
-    def test_telegram_notify_with_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test telegram notification with title."""
-        mock_telegram = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_telegram.notify.return_value = mock_result
-
-        monkeypatch.setattr("notifications.telegram", mock_telegram)
-
-        telegram_notify("Test message", "Test title")
-
-        mock_telegram.notify.assert_called_once_with(
-            message="<b>Test title</b>\nTest message", parse_mode="html"
-        )
-
-    def test_telegram_notify_without_title(
+    def test_notification_setup_environ_multiple_success(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test telegram notification without title."""
-        mock_telegram = Mock()
-        mock_result = Mock()
-        mock_result.status = "Success"
-        mock_telegram.notify.return_value = mock_result
+        """Test successful notification after getting multiple urls from environ."""
+        mock_apprise = Mock()
 
-        monkeypatch.setattr("notifications.telegram", mock_telegram)
-
-        telegram_notify("Test message")
-
-        mock_telegram.notify.assert_called_once_with(
-            message="Test message", parse_mode="html"
-        )
-
-    def test_xmpp_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test successful XMPP notification."""
         mock_environ: dict[str, str] = {
-            "NOTIFIERS_XMPP_JID": "user@example.com",
-            "NOTIFIERS_XMPP_PASSWORD": "password",
-            "NOTIFIERS_XMPP_RECEIVER": "receiver@example.com",
+            "NOTIFIER_APPRISE_URLS": "gotify://hostname/token;tgram://bottoken/ChatID",
         }
-        mock_xmpp = Mock()
-        mock_jid = Mock()
-        mock_jid.getDomain.return_value = "example.com"
-        mock_jid.getNode.return_value = "user"
-        mock_jid.getResource.return_value = "resource"
-        mock_xmpp.protocol.JID.return_value = mock_jid
-
-        mock_client = Mock()
-        mock_client.connect.return_value = True
-        mock_client.auth.return_value = True
-        mock_client.send.return_value = True
-        mock_xmpp.Client.return_value = mock_client
 
         monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("notifications.xmpp", mock_xmpp)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
 
-        xmpp_notify("Test message")
+        notification_setup(None)
 
-        mock_client.connect.assert_called_once()
-        mock_client.auth.assert_called_once()
-        mock_client.send.assert_called_once()
+        assert mock_apprise.add.call_count == 2
 
-    def test_xmpp_notify_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test XMPP notification with missing environment variables."""
-        mock_environ: dict[str, str] = {}
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        xmpp_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "XMPP notifications require" in mock_print.call_args[0][0]
-
-    def test_gotify_notify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test successful Gotify notification."""
-        mock_environ: dict[str, str] = {
-            "GOTIFY_HOST": "http://localhost:8080",
-            "GOTIFY_TOKEN": "test_token",
-            "GOTIFY_PRIORITY": "5",
-        }
-        mock_requests = Mock()
-        mock_requests.post.return_value = Mock()
-
-        monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("notifications.requests", mock_requests)
-
-        gotify_notify("Test message", "Test title")
-
-        mock_requests.post.assert_called_once_with(
-            "http://localhost:8080/message?token=test_token",
-            json={"message": "Test message", "priority": 5, "title": "Test title"},
-        )
-
-    def test_gotify_notify_missing_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test Gotify notification with missing environment variables."""
-        mock_environ: dict[str, str] = {}
-        mock_print = Mock()
-
-        monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("builtins.print", mock_print)
-
-        gotify_notify("Test message")
-
-        mock_print.assert_called_once()
-        assert "GOTIFY notifications require" in mock_print.call_args[0][0]
-
-    def test_gotify_notify_default_priority(
+    def test_notification_setup_no_environ_fail(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test Gotify notification with default priority."""
-        mock_environ: dict[str, str] = {
-            "GOTIFY_HOST": "http://localhost:8080",
-            "GOTIFY_TOKEN": "test_token",
-        }
-        mock_requests = Mock()
-        mock_requests.post.return_value = Mock()
+        """Test notification failure after getting url from environ."""
+        mock_apprise = Mock()
+        mock_print = Mock()
 
-        monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("notifications.requests", mock_requests)
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
 
-        gotify_notify("Test message")
+        notification_setup(None)
 
-        mock_requests.post.assert_called_once_with(
-            "http://localhost:8080/message?token=test_token",
-            json={"message": "Test message", "priority": 5, "title": "medihunter"},
+        mock_apprise.add.assert_not_called()
+        mock_print.assert_called_once()
+        assert (
+            "notifications require NOTIFIER_APPRISE_URLS to be exported."
+            in mock_print.call_args[0][0]
         )
 
-    def test_gotify_notify_request_exception(
+    def test_notification_setup_config_success(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test Gotify notification with request exception."""
-        mock_environ = {
-            "GOTIFY_HOST": "http://localhost:8080",
-            "GOTIFY_TOKEN": "test_token",
+        """Test successful notification with config after getting url from environ."""
+        mock_apprise = Mock()
+        mock_path = "path/to/file"
+
+        mock_environ: dict[str, str] = {
+            "NOTIFIER_APPRISE_URLS": "gotify://hostname/token",
+            "NOTIFIER_APPRISE_CONFIG": mock_path,
         }
-        mock_requests = Mock()
-        mock_requests.post.side_effect = requests.exceptions.RequestException(
-            "Connection error"
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        notification_setup(None)
+
+        assert mock_apprise.add.call_count == 2
+
+    def test_legacy_prowl_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test prowl notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_PROWL_API_KEY": "apikey",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_prowl_setup()
+
+        mock_apprise.add.assert_called_once_with("prowl://apikey")
+
+    def test_legacy_prowl_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test prowl notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_prowl_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "Prowl notifications require NOTIFIERS_PROWL_API_KEY to be exported."
+            in mock_print.call_args[0][0]
         )
-        mock_requests.exceptions = requests.exceptions
+
+    def test_legacy_pushbullet_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test pushbullet notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_PUSHBULLET_TOKEN": "token",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_pushbullet_setup()
+
+        mock_apprise.add.assert_called_once_with("pbul://token")
+
+    def test_legacy_pushbullet_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test pushbullet notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_pushbullet_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "Pushbullet notifications require NOTIFIERS_PUSHBULLET_TOKEN to be exported."
+            in mock_print.call_args[0][0]
+        )
+
+    def test_legacy_pushover_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test pushover notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_PUSHOVER_USER": "user",
+            "NOTIFIERS_PUSHOVER_TOKEN": "token",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_pushover_setup()
+
+        mock_apprise.add.assert_called_once_with("pover://user@token")
+
+    def test_legacy_pushover_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test pushover notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_pushover_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "Pushover notifications require NOTIFIERS_PUSHOVER_USER and NOTIFIERS_PUSHOVER_TOKEN to be exported."
+            in mock_print.call_args[0][0]
+        )
+
+    def test_legacy_telegram_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test telegram notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_TELEGRAM_TOKEN": "token",
+            "NOTIFIERS_TELEGRAM_CHAT_ID": "chat_id",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_telegram_setup()
+
+        mock_apprise.add.assert_called_once_with("tgram://token/chat_id")
+
+    def test_legacy_telegram_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test telegram notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_telegram_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "Telegram notifications require NOTIFIERS_TELEGRAM_TOKEN and NOTIFIERS_TELEGRAM_CHAT_ID to be exported."
+            in mock_print.call_args[0][0]
+        )
+
+    def test_legacy_xmpp_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test xmpp notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_XMPP_JID": "user@host",
+            "NOTIFIERS_XMPP_PASSWORD": "pass",
+            "NOTIFIERS_XMPP_RECEIVER": "receiver@host",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_xmpp_setup()
+
+        mock_apprise.add.assert_called_once_with(
+            "xmpp://user:pass@host/user@host/receiver@host"
+        )
+
+    def test_legacy_xmpp_invalid_jid_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test xmpp notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "NOTIFIERS_XMPP_JID": "badlyseparatedjid",
+            "NOTIFIERS_XMPP_PASSWORD": "pass",
+            "NOTIFIERS_XMPP_RECEIVER": "receiver@host",
+        }
         mock_print = Mock()
 
         monkeypatch.setattr("notifications.environ", mock_environ)
-        monkeypatch.setattr("notifications.requests", mock_requests)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
         monkeypatch.setattr("builtins.print", mock_print)
 
-        gotify_notify("Test message")
+        legacy_xmpp_setup()
 
         mock_print.assert_called_once()
-        assert "GOTIFY notification failed" in mock_print.call_args[0][0]
+        assert (
+            "NOTIFIERS_XMPP_JID environment variable contains invalid jid=badlyseparatedjid"
+            in mock_print.call_args[0][0]
+        )
+
+    def test_legacy_xmpp_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test telegram notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_xmpp_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "XMPP notifications require NOTIFIERS_XMPP_JID, NOTIFIERS_XMPP_PASSWORD and NOTIFIERS_XMPP_RECEIVER to be exported."
+            in mock_print.call_args[0][0]
+        )
+
+    def test_legacy_gotify_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test gotify notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "GOTIFY_HOST": "host",
+            "GOTIFY_TOKEN": "token",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_gotify_setup()
+
+        mock_apprise.add.assert_called_once_with("gotifys://host/token?priority=normal")
+
+    def test_legacy_gotify_high_priority_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test gotify high priority notification."""
+        mock_apprise = Mock()
+        mock_environ: dict[str, str] = {
+            "GOTIFY_HOST": "host",
+            "GOTIFY_TOKEN": "token",
+            "GOTIFY_PRIORITY": "10",
+        }
+
+        monkeypatch.setattr("notifications.environ", mock_environ)
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+
+        legacy_gotify_setup()
+
+        mock_apprise.add.assert_called_once_with("gotifys://host/token?priority=high")
+
+    def test_legacy_gotify_missing_conf_fail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test gotify notification with missing variables."""
+        mock_apprise = Mock()
+        mock_print = Mock()
+
+        monkeypatch.setattr("notifications.environ", {})
+        monkeypatch.setattr("notifications.apprise", mock_apprise)
+        monkeypatch.setattr("builtins.print", mock_print)
+
+        legacy_gotify_setup()
+
+        mock_print.assert_called_once()
+        assert (
+            "Gotify notifications require GOTIFY_HOST (base url with port), GOTIFY_TOKEN to be exported."
+            in mock_print.call_args[0][0]
+        )
 
 
 class TestExceptions:
@@ -1274,7 +1279,7 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     )
     mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
     mock_notifier.assert_called_once_with(
-        "pushbullet", "Test", appointments=[{"id": 1, "name": "Appointment"}]
+        "Test", appointments=[{"id": 1, "name": "Appointment"}]
     )
 
 
@@ -1442,12 +1447,12 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
 
     mock_display.assert_any_call([{"id": 1, "name": "Appointment 1"}])
     mock_notifier.assert_any_call(
-        "pushover", "Interval Test", appointments=[{"id": 1, "name": "Appointment 1"}]
+        "Interval Test", appointments=[{"id": 1, "name": "Appointment 1"}]
     )
 
     mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
     mock_notifier.assert_any_call(
-        "pushover", "Interval Test", appointments=[{"id": 2, "name": "Appointment 2"}]
+        "Interval Test", appointments=[{"id": 2, "name": "Appointment 2"}]
     )
 
 

@@ -18,115 +18,118 @@
 
 from os import environ
 
-import requests
-from notifiers import get_notifier
-from notifiers.exceptions import BadArguments
-from xmpp import xmpp
+from apprise import Apprise, AppriseConfig
 
-pushbullet = get_notifier("pushbullet")
-pushover = get_notifier("pushover")
-telegram = get_notifier("telegram")
+apprise = Apprise()
 
 
-def prowl_notify(message: str, title: str | None = None) -> None:
-    if not environ.get("NOTIFIERS_PROWL_API_KEY"):
+def notification_setup(concatenated_urls: str | None = None) -> None:
+    try:
+        if concatenated_urls is None:
+            concatenated_urls = environ["NOTIFIER_APPRISE_URLS"]
+
+        config_path = environ.get("NOTIFIER_APPRISE_CONFIG")
+        if config_path:
+            config = AppriseConfig()
+            config.add(config_path)
+            apprise.add(config)
+
+        url_list = concatenated_urls.split(";")
+
+        for url in url_list:
+            apprise.add(url)
+    except KeyError as e:
         print(
-            "Prowl notifications require NOTIFIERS_PROWL_API_KEY environment to be exported.",
+            f"notifications require NOTIFIER_APPRISE_URLS to be exported. "
+            f"Detailed exception:\n{e}"
         )
-        return
 
-    url = "https://api.prowlapp.com/publicapi/add"
-    payload = {
-        "apikey": environ.get("NOTIFIERS_PROWL_API_KEY", ""),
-        "priority": -1,
-        "application": title or "MediChaser",
-        "event": "Alert",
-        "description": message,
-    }
+
+def notify(message: str, title: str | None = None) -> bool | None:
+    if title is None:
+        title = "medichaser"
+
+    return apprise.notify(body=message, title=title)
+
+
+def legacy_prowl_setup() -> None:
     try:
-        response = requests.post(url=url, data=payload, timeout=3)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"Prowl notification failed:\n{e}")
+        api_key = environ["NOTIFIERS_PROWL_API_KEY"]
 
-
-def pushbullet_notify(message: str, title: str | None = None) -> None:
-    try:
-        if title is None:
-            r = pushbullet.notify(message=message)
-        else:
-            r = pushbullet.notify(message=message, title=title)
-    except BadArguments as e:
-        print(f"Pushbullet failed\n{e}")
-        return
-
-    if r.status != "Success":
-        print(f"Pushbullet notification failed:\n{r.errors}")
-
-
-def pushover_notify(message: str, title: str | None = None) -> None:
-    try:
-        if title is None:
-            r = pushover.notify(message=message)
-        else:
-            r = pushover.notify(message=message, title=title)
-    except BadArguments as e:
-        print(f"Pushover failed\n{e}")
-        return
-
-    if r.status != "Success":
-        print(f"Pushover notification failed:\n{r.errors}")
-
-
-def telegram_notify(message: str, title: str | None = None) -> None:
-    try:
-        if title:
-            message = f"<b>{title}</b>\n{message}"
-
-        r = telegram.notify(message=message, parse_mode="html")
-    except BadArguments as e:
+        notification_setup(f"prowl://{api_key}")
+    except KeyError as e:
         print(
-            f"Telegram notifications require NOTIFIERS_TELEGRAM_CHAT_ID"
-            f" and NOTIFIERS_TELEGRAM_TOKEN environments to be exported. Detailed exception:\n{e}"
+            f"Prowl notifications require NOTIFIERS_PROWL_API_KEY to be exported. "
+            f"Detailed exception:\n{e}"
         )
-        return
-
-    if r.status != "Success":
-        print(f"Telegram notification failed\n{r.errors}")
 
 
-def xmpp_notify(message: str) -> None:
+def legacy_pushbullet_setup() -> None:
+    try:
+        token = environ["NOTIFIERS_PUSHBULLET_TOKEN"]
+
+        notification_setup(f"pbul://{token}")
+    except KeyError as e:
+        print(
+            f"Pushbullet notifications require NOTIFIERS_PUSHBULLET_TOKEN to be exported. "
+            f"Detailed exception:\n{e}"
+        )
+
+
+def legacy_pushover_setup() -> None:
+    try:
+        user = environ["NOTIFIERS_PUSHOVER_USER"]
+        token = environ["NOTIFIERS_PUSHOVER_TOKEN"]
+
+        notification_setup(f"pover://{user}@{token}")
+    except KeyError as e:
+        print(
+            f"Pushover notifications require NOTIFIERS_PUSHOVER_USER and NOTIFIERS_PUSHOVER_TOKEN"
+            f" to be exported. Detailed exception:\n{e}"
+        )
+
+
+def legacy_telegram_setup() -> None:
+    try:
+        token = environ["NOTIFIERS_TELEGRAM_TOKEN"]
+        chat_id = environ["NOTIFIERS_TELEGRAM_CHAT_ID"]
+
+        notification_setup(f"tgram://{token}/{chat_id}")
+    except KeyError as e:
+        print(
+            f"Telegram notifications require NOTIFIERS_TELEGRAM_TOKEN and NOTIFIERS_TELEGRAM_CHAT_ID"
+            f" to be exported. Detailed exception:\n{e}"
+        )
+
+
+def legacy_xmpp_setup() -> None:
     try:
         jid = environ["NOTIFIERS_XMPP_JID"]
+        jid_elements = jid.split("@")
+        user = jid_elements[0]
+        host = jid_elements[1]
         password = environ["NOTIFIERS_XMPP_PASSWORD"]
         receiver = environ["NOTIFIERS_XMPP_RECEIVER"]
 
-        r = xmpp.protocol.JID(jid)
-        conn = xmpp.Client(server=r.getDomain(), debug=False)
-        if (
-            (not conn.connect())
-            or (
-                not conn.auth(
-                    user=r.getNode(), password=password, resource=r.getResource()
-                )
-            )
-            or (not conn.send(xmpp.protocol.Message(to=receiver, body=message)))  # pyright: ignore[reportAttributeAccessIssue]
-        ):
-            print("XMPP notification failed")
+        notification_setup(f"xmpp://{user}:{password}@{host}/{jid}/{receiver}")
     except KeyError as e:
         print(
             f"XMPP notifications require NOTIFIERS_XMPP_JID, NOTIFIERS_XMPP_PASSWORD"
             f" and NOTIFIERS_XMPP_RECEIVER to be exported. Detailed exception:\n{e}"
         )
+    except IndexError as e:
+        print(
+            f"NOTIFIERS_XMPP_JID environment variable contains invalid jid={jid}. Detailed exception:\n{e}"
+        )
 
 
-def gotify_notify(message: str, title: str | None = None) -> None:
+def legacy_gotify_setup() -> None:
     try:
         host = environ["GOTIFY_HOST"]
         token = environ["GOTIFY_TOKEN"]
     except KeyError as e:
         print(
-            f"GOTIFY notifications require GOTIFY_HOST (base url with port),"
+            f"Gotify notifications require GOTIFY_HOST (base url with port),"
             f" GOTIFY_TOKEN to be exported. Detailed exception:\n{e}"
         )
         return
@@ -136,14 +139,14 @@ def gotify_notify(message: str, title: str | None = None) -> None:
     except (KeyError, ValueError):
         prio = 5
 
-    if title is None:
-        title = "medihunter"
+    match prio:
+        case 1 | 2:
+            str_prio = "low"
+        case 3 | 4:
+            str_prio = "moderate"
+        case 5 | 6:
+            str_prio = "normal"
+        case _:
+            str_prio = "high"
 
-    try:
-        requests.post(
-            host + "/message?token=" + token,
-            json={"message": message, "priority": int(prio), "title": title},
-        )
-
-    except requests.exceptions.RequestException as e:
-        print(f"GOTIFY notification failed:\n{e}")
+    notification_setup(f"gotifys://{host}/{token}?priority={str_prio}")
