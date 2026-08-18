@@ -141,7 +141,7 @@ All commands are run from the web terminal.
 - **Continuous monitoring and notifications**:
 
     ```bash
-    python medichaser.py find-appointment -r 204 -s 132 -i 15 -n gotify -t "Pediatra Warszawa"
+    python medichaser.py find-appointment -r 204 -s 132 -i 15 -n -t "Pediatra Warszawa"
     ```
 
     To run the monitoring process in the background within the web terminal, you can use `screen`:
@@ -166,37 +166,10 @@ All commands are run from the web terminal.
 
 ## Notifications Setup
 
-Add the required environment variables for your preferred service to the `.env` file.
+Medichaser uses apprise to send notifications. You need to fill the value of `NOTIFIER_APPRISE_URLS` in `.env` file. 
 
-### Gotify
-
-- `GOTIFY_HOST`: Your server URL (e.g., `http://gotify.example.com:8080`).
-- `GOTIFY_TOKEN`: Your app token.
-- `GOTIFY_PRIORITY` (Optional): Default is `5`.
-
-### Telegram
-
-- `NOTIFIERS_TELEGRAM_TOKEN`: Your bot token.
-- `NOTIFIERS_TELEGRAM_CHAT_ID`: The chat ID to send messages to.
-
-### Pushover
-
-- `NOTIFIERS_PUSHOVER_USER`: Your user key.
-- `NOTIFIERS_PUSHOVER_TOKEN`: Your application API token.
-
-### Pushbullet
-
-- `NOTIFIERS_PUSHBULLET_TOKEN`: Your access token.
-
-### Prowl
-
-- `NOTIFIERS_PROWL_API_KEY`: Your API key.
-
-### XMPP (Jabber)
-
-- `NOTIFIERS_XMPP_JID`: Your full JID (`user@example.com`).
-- `NOTIFIERS_XMPP_PASSWORD`: Your password.
-- `NOTIFIERS_XMPP_RECEIVER`: The recipient's JID.
+Supported notification services, including pushbullet, pushover, telegram, xmpp, gotify, prowl and hundreds of others can be found here:
+https://appriseit.com/services/
 
 ---
 
